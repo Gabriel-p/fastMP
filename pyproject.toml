@@ -1,0 +1,24 @@
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastMP_gabrielp"
+version = "0.0.4-alpha"
+authors = [
+  { name="Gabriel P", email="gabrielperren@gmail.com" },
+]
+description = "Fast membership probability estimation for star clusterts"
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Gabriel-p/fastMP"
+"Bug Tracker" = "https://github.com/Gabriel-p/fastMP/issues"
