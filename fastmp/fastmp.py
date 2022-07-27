@@ -6,56 +6,48 @@ from scipy.spatial.distance import cdist
 
 
 class fastMP:
-    """Summary
-
+    """
     Attributes
     ----------
-    CG_data_file : str
+    large_dist_perc : TYPE
         Description
-    large_dist_perc : float
+    n_clusters : TYPE
         Description
-    n_clusters : int
+    N_groups_large_dist : TYPE
         Description
-    N_groups_large_dist : int
+    N_loop : TYPE
         Description
-    N_loop : int
+    N_membs : TYPE
         Description
-    N_membs : int
+    N_resample : TYPE
         Description
-    N_resample : int
+    N_std : TYPE
         Description
-    out_path : str
+    N_zoom : TYPE
         Description
-    read_PM_center : bool
+    read_PM_center : TYPE
         Description
-    zoom_f : int
+    vpd_c : TYPE
+        Description
+    zoom_f : TYPE
         Description
     """
 
     def __init__(self,
-                 method=None,
-                 classifDims=5,
-                 N_membs=25,
-                 n_clusters=1000,
+                 N_membs=None,
                  N_zoom=10,
-                 zoom_f=3,
+                 zoom_f=5,
                  N_groups_large_dist=100,
                  large_dist_perc=0.75,
-                 N_resample=10,
-                 read_PM_center=None,
+                 N_resample=100,
                  N_loop=2,
                  N_std=3,
                  vpd_c=None):
-        self.method = method
-        self.classifDims = classifDims
-
-        self.n_clusters = n_clusters
         self.N_zoom = N_zoom
         self.zoom_f = zoom_f
         self.N_groups_large_dist = N_groups_large_dist
         self.large_dist_perc = large_dist_perc
         self.N_resample = N_resample
-        self.read_PM_center = read_PM_center
         self.N_membs = N_membs
         self.N_loop = N_loop
         self.N_std = N_std
@@ -64,21 +56,23 @@ class fastMP:
     def fit(self, X):
         """
         """
+        # Remove nans
+        msk_nonans, X = self.remNans(X)
+
+        # Prepare input data
         lon, lat, pmRA, e_pmRA, pmDE, e_pmDE, plx, e_plx = X
-
-        # 
         rads, Kest = self.rkparams(lon, lat)
-
-        from sklearn.naive_bayes import GaussianNB
-        from sklearn.calibration import CalibratedClassifierCV
-        gnb = GaussianNB()
-        gnb_method = CalibratedClassifierCV(gnb, method=self.method)
-
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
-        # idx_selected = []
-        probs_all = []
+        if self.N_membs is None:
+            self.N_membs = min(25, max(int(.1 * len(lon)), 10))
+
+        # # Estimate initial VPD center
+        # vpd_c = self.initVPDCenter(Kest, rads, lon, lat, data_3)
+
+        idx_selected = []
+        # vpd_c_all = [vpd_c]
         for _ in range(self.N_resample):
             # Sample data
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
@@ -86,6 +80,12 @@ class fastMP:
             # Estimate VPD center
             if self.vpd_c is None:
                 vpd_c = self.centVPD(np.array([s_pmRA, s_pmDE]).T)
+
+            # # Estimate VPD center. Use initial estimate for the first run
+            # if _ > 0:
+            #     vpd_c = self.centVPD(np.array([s_pmRA, s_pmDE]).T)
+            #     vpd_c_all.append(vpd_c)
+            #     vpd_c = np.median(vpd_c_all, 0)
 
             # Estimate Plx center
             plx_c = self.centPlx(s_pmRA, s_pmDE, s_Plx, vpd_c)
@@ -98,27 +98,61 @@ class fastMP:
             st_idx = self.getStars(Kest, rads, lon, lat, dist_idxs)
 
             # Remove outliers
-            st_idx = self.sigmaClip(
-                s_pmRA, s_pmDE, s_Plx, st_idx, self.N_loop, self.N_std)
+            st_idx = self.sigmaClip(s_pmRA, s_pmDE, s_Plx, st_idx)
 
-            # idx_selected += st_idx
+            idx_selected += st_idx
 
-            cl_probs = self.kdeClassif(
-                np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T, st_idx,
-                gnb_method, self.classifDims)
+        # Assign probabilities as averages of counts
+        values, counts = np.unique(idx_selected, return_counts=True)
+        probs = counts / self.N_resample
+        probs_all = np.zeros(len(lon))
+        probs_all[values] = probs
 
-            if cl_probs is not None:
-                probs_all.append(cl_probs)
+        # Mark nans with '-1'
+        probs_final = np.zeros(len(probs)) - 1
+        probs_final[~msk_nonans] = probs_all
 
-        # # Assign probabilities
-        # values, counts = np.unique(idx_selected, return_counts=True)
-        # probs = counts / N_resample
-        # probs_all = np.zeros(len(lon))
-        # probs_all[values] = probs
+        return probs_final
 
-        probs_all = np.array(probs_all).mean(0)
+    def remNans(X):
+        """
+        Remove nans
+        """
+        msk_old = [False for _ in range(len(X[0]))]
+        for dim in X:
+            msk = np.isnan(dim)
+            msk = msk_old | msk
+        msk_nonans = ~msk
+        X_nonans = [_[msk_nonans] for _ in X]
 
-        return probs_all
+        return msk_nonans, X_nonans
+
+    # def initVPDCenter(self, Kest, rads, lon, lat, data_3):
+    #     """
+    #     """
+    #     pmRA, pmDE, Plx = data_3
+    #     # Estimate VPD center
+    #     if self.vpd_c is None:
+    #         vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
+    #     else:
+    #         vpd_c = self.vpd_c
+
+    #     # Estimate Plx center
+    #     plx_c = self.centPlx(pmRA, pmDE, Plx, vpd_c)
+
+    #     # Obtain indexes of stars closest to the VPD+Plx center
+    #     cent_all = np.array([vpd_c[0], vpd_c[1], plx_c])
+    #     dist_idxs = self.getDists(pmRA, pmDE, Plx, cent_all)
+
+    #     # Find probable members comparing 
+    #     st_idx = self.getStars(Kest, rads, lon, lat, dist_idxs)
+
+    #     # Remove outliers
+    #     st_idx = self.sigmaClip(pmRA, pmDE, Plx, st_idx)
+
+    #     vpd_c = (np.median(pmRA[st_idx]), np.median(pmDE[st_idx]))
+
+    #     return vpd_c
 
     def rkparams(self, lon, lat):
         """
@@ -144,7 +178,7 @@ class fastMP:
         grs = np.random.normal(0., 1., data_3.shape[1])
         return data_3 + grs * data_err
 
-    def centVPD(self, vpd, N_dim=2):
+    def centVPD(self, vpd, n_clusters=1000, N_dim=2):
         """
         Estimate the center of the cluster in the proper motions space.
 
@@ -163,15 +197,19 @@ class fastMP:
         TYPE
             Description
         """
+        break_flag = False
+        if vpd.shape[0] > self.N_membs * 4 * 2:
+            break_flag = True
+
         for _ in range(self.N_zoom):
             N_stars = vpd.shape[0]
 
-            if N_stars < self.N_membs * 4:
+            if break_flag and N_stars < self.N_membs * 4:
                 break
 
             N_bins = max(3, int(N_stars / self.N_membs))
-            if N_bins**N_dim > self.n_clusters:
-                N_bins = int(self.n_clusters**(1 / N_dim))
+            if N_bins**N_dim > n_clusters:
+                N_bins = int(n_clusters**(1 / N_dim))
 
             H, edges = np.histogramdd(vpd, bins=(N_bins, N_bins))
             edgx, edgy = edges
@@ -181,13 +219,6 @@ class fastMP:
             cbx, cby = np.unravel_index(flat_idx, H.shape)
             cx = (edgx[cbx + 1] + edgx[cbx]) / 2.
             cy = (edgy[cby + 1] + edgy[cby]) / 2.
-
-            # This makes the process very non-robust
-            # Hg = gaussian_filter(H, sigma=5)
-            # flat_idx = Hg.argmax()
-            # cbx, cby = np.unravel_index(flat_idx, Hg.shape)
-            # cx = (edgx[cbx + 1] + edgx[cbx]) / 2.
-            # cy = (edgy[cby + 1] + edgy[cby]) / 2.
 
             # Zoom in
             x, y = vpd.T
@@ -271,9 +302,14 @@ class fastMP:
         N_stars = len(lon)
         # Estimate average C_s of large distance stars
         C_S_field = []
+
+        #
         N_low1 = N_stars - self.N_groups_large_dist * self.N_membs
         N_low2 = int(N_stars * self.large_dist_perc)
         N_low = max(N_low1, N_low2)
+        if N_low > N_stars - self.N_membs:
+            N_low = N_stars - self.N_membs - 1
+
         step_old = -1
         for step in np.arange(N_stars - self.N_membs, N_low, -self.N_membs):
             msk = d_idxs[step:step_old]
@@ -284,9 +320,13 @@ class fastMP:
             step_old = step
 
         # This value is associated to the field stars' distribution. When it
-        # is achieved, the block below breaks out. The larger this value,
-        # the more restrictive the process becomes.
-        C_thresh = np.median(C_S_field)
+        # is achieved, the block below breaks out, having achieved the value
+        # associated to the field distribution. The larger this value,
+        # the more stars will be included in the members selection returned.
+        if C_S_field:
+            C_thresh = np.median(C_S_field)
+        else:
+            C_thresh = np.inf
 
         # Find Ripley's K value where the stars differ from the estimated
         # field value
@@ -341,74 +381,16 @@ class fastMP:
 
         return C_s
 
-    def sigmaClip(self, s_pmRA, s_pmDE, s_Plx, st_idx, N_loop, N_std):
+    def sigmaClip(self, s_pmRA, s_pmDE, s_Plx, st_idx):
         """
         Remove outliers in the VPD+Plx space.
         """
         xyz = np.array([s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx]]).T
         idxs = np.array(st_idx)
-        for _ in range(N_loop):
+        for _ in range(self.N_loop):
             xy_d = cdist(xyz, xyz.mean(0).reshape(-1, 3)).T[0]
             xy_std = xyz.std(0).mean()
-            msk_s3 = xy_d < N_std * xy_std
+            msk_s3 = xy_d < self.N_std * xy_std
             xyz, idxs = xyz[msk_s3], idxs[msk_s3]
 
         return list(idxs)
-
-    def kdeClassif(self, data, st_idx, gnb_method, Ndims, Nst_max=5000):
-        """
-        Assign probabilities to all stars after generating the KDEs for
-        field and member stars. The Cluster probability is obtained
-        applying the formula for two mutually exclusive and exhaustive
-        hypotheses.
-        """
-        # Split into the two populations.
-        msk = np.array(st_idx)
-
-        labels = np.zeros(len(data))
-        labels[msk] = 1
-
-        # from sklearn.linear_model import LogisticRegression
-        # logreg = LogisticRegression()
-        # clf = logreg.fit(data, labels)
-        # probs = clf.predict_proba(data)
-        # clf = logreg.fit(data[:, 2:], labels)
-        # probs = clf.predict_proba(data[:, 2:])
-
-        clf = gnb_method.fit(data[:, Ndims:], labels)
-        probs = clf.predict_proba(data[:, Ndims:])
-
-        return probs.T[1]
-
-
-        # msk_f = np.arange(0, len(data))
-        # f_idx = np.array(list(set(msk_f) - set(msk)))
-        # membs_stars = data[st_idx]
-        # field_stars = data[f_idx]
-
-        # # To improve the performance, cap the number of stars using a random
-        # # selection of 'Nf_max' elements.
-        # if field_stars.shape[0] > Nst_max:
-        #     idxs = np.arange(field_stars.shape[0])
-        #     np.random.shuffle(idxs)
-        #     field_stars = field_stars[idxs[:Nst_max]]
-
-        # # Evaluate all stars in both KDEs
-        # try:
-        #     kd_field = gaussian_kde(field_stars.T)
-        #     kd_memb = gaussian_kde(membs_stars.T)
-
-        #     L_memb = kd_memb.evaluate(data.T) + 1e-6
-        #     L_field = kd_field.evaluate(data.T)
-
-        #     # with warnings.catch_warnings():
-        #     #     warnings.simplefilter("ignore")
-        #     # Probabilities for mutually exclusive and exhaustive
-        #     # hypotheses
-        #     cl_probs = 1. / (1. + (L_field / L_memb))
-
-        # except (np.linalg.LinAlgError, ValueError):
-        #     # print("WARNING: Could not perform KDE probabilities estimation")
-        #     return None
-
-        # return cl_probs
