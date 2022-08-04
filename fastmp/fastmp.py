@@ -88,19 +88,6 @@ class fastMP:
             # Most probable members given their coordinates distribution
             st_idx = self.getStars(rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
 
-            # if st_idx:
-            #     # N_clusts, st_idx = self.getGMM(
-            #     #     rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE,
-            #     #     s_Plx, st_idx)
-            #     N_clusts_old = np.inf
-            #     for _ in range(100):
-            #         N_clusts, st_idx = self.getGMM(
-            #             rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE,
-            #             s_Plx, st_idx)
-            #         if len(st_idx) < self.N_membs or N_clusts_old == N_clusts:
-            #             break
-            #         N_clusts_old = N_clusts
-
             # # Remove outliers
             # st_idx = self.sigmaClip(s_pmRA, s_pmDE, s_Plx, st_idx)
 
