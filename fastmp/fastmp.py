@@ -3,8 +3,7 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
-from sklearn.preprocessing import StandardScaler
-
+# from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 import matplotlib.pyplot as plt
 
@@ -38,14 +37,14 @@ class fastMP:
 
     def __init__(self,
                  N_membs=25,
-                 N_groups_large_dist=100,
-                 large_dist_perc=0.75,
+                 # N_groups_large_dist=100,
+                 # large_dist_perc=0.75,
                  N_resample=100,
                  N_loop=2,
                  N_std=3,
                  vpd_c=None):
-        self.N_groups_large_dist = N_groups_large_dist
-        self.large_dist_perc = large_dist_perc
+        # self.N_groups_large_dist = N_groups_large_dist
+        # self.large_dist_perc = large_dist_perc
         self.N_resample = N_resample
         self.N_membs = N_membs
         self.N_loop = N_loop
@@ -55,19 +54,22 @@ class fastMP:
     def fit(self, X):
         """
         """
-        # Remove nans
-        msk_nonans, X = self.remNans(X)
+        # msk_nonans, X = self.remNans(X)
+        # print(X.shape, msk_nonans.sum())
+        # Remove outliers and nans
+        msk_accpt, X = self.outlRjct(X)
 
         # Prepare input data
-        lon, lat, pmRA, e_pmRA, pmDE, e_pmDE, plx, e_plx, mag, e_mag, col, e_col = X
+        lon, lat, pmRA, e_pmRA, pmDE, e_pmDE, plx, e_plx = X
+
+        # xy_data = np.array([lon, lat]).T
+        # _xrange, _yrange = np.ptp(xy_data, 0)
+        # xy = MinMaxScaler().fit(xy_data).transform(xy_data)
+        # lon, lat = xy.T
 
         rads, Kest, C_thresh_N = self.rkparams(lon, lat)
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
-
-        # vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
-        # # Estimate Plx center
-        # plx_c = self.centPlx(pmRA, pmDE, plx, vpd_c)
 
         idx_selected = []
         for _ in range(self.N_resample):
@@ -81,37 +83,60 @@ class fastMP:
 
             # Obtain indexes of stars closest to the VPD+Plx center
             cent_all = np.array([vpd_c[0], vpd_c[1], plx_c])
-            dist_idxs = self.getDists(s_pmRA, s_pmDE, s_Plx, cent_all)
+            dist_idxs, dist_sorted = self.getDists(s_pmRA, s_pmDE, s_Plx, cent_all)
 
             # Most probable members given their coordinates distribution
-            st_idx = self.getStars(rads, Kest, C_thresh_N, lon, lat, dist_idxs)
+            st_idx = self.getStars(rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
+
+            # if st_idx:
+            #     # N_clusts, st_idx = self.getGMM(
+            #     #     rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE,
+            #     #     s_Plx, st_idx)
+            #     N_clusts_old = np.inf
+            #     for _ in range(100):
+            #         N_clusts, st_idx = self.getGMM(
+            #             rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE,
+            #             s_Plx, st_idx)
+            #         if len(st_idx) < self.N_membs or N_clusts_old == N_clusts:
+            #             break
+            #         N_clusts_old = N_clusts
 
             # # Remove outliers
             # st_idx = self.sigmaClip(s_pmRA, s_pmDE, s_Plx, st_idx)
 
             idx_selected += st_idx
 
-        probs_final = self.assignProbs(msk_nonans, idx_selected)
-
-        # probs = self.bayesianProbs(probs, mag, e_mag, col, e_col)
-
-        # # Mark nans with '-1'
-        # probs_final = np.zeros(len(msk_nonans)) - 1
-        # probs_final[msk_nonans] = probs
+        probs_final = self.assignProbs(msk_accpt, idx_selected)
 
         return probs_final
 
-    def remNans(self, X):
-        """
-        Remove nans
-        """
-        msk = [False for _ in range(len(X[0]))]
-        for dim in X:
-            msk = msk | np.isnan(dim)
-        msk_nonans = ~msk
-        X_nonans = [_[msk_nonans] for _ in X]
+    # def remNans(self, X):
+    #     """
+    #     Remove nans
+    #     """
+    #     msk = [False for _ in range(len(X[0]))]
+    #     for dim in X:
+    #         msk = msk | np.isnan(dim)
+    #     msk_nonans = ~msk
+    #     X_nonans = np.array([_[msk_nonans] for _ in X])
 
-        return msk_nonans, X_nonans
+    #     return msk_nonans, X_nonans
+
+    def outlRjct(self, data, nstd=5):
+        """
+        Remove outliers and nans
+        """
+        msk_all = []
+        # Process each dimension separately
+        for arr in data:
+            med, std = np.nanmedian(arr), np.nanstd(arr)
+            dmin, dmax = med - nstd * std, med + nstd * std
+            msk = (arr > dmin) & (arr < dmax) & ~np.isnan(arr)
+            msk_all.append(msk.data)
+        # Combine into a single mask
+        msk_accpt = np.logical_and.reduce(msk_all)
+
+        return msk_accpt, data.T[msk_accpt].T
 
     def rkparams(self, lon, lat):
         """
@@ -137,7 +162,7 @@ class fastMP:
         """
         Gaussian random sample
         """
-        grs = np.random.normal(0., 1., data_3.shape[1])
+        grs = np.random.normal(0., 1., data_3.shape[1]) * .1
         return data_3 + grs * data_err
 
     def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
@@ -223,7 +248,7 @@ class fastMP:
         # Distance to VPD center
         dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
         # Closest stars to center
-        idx = dist.argsort()[: M * self.N_membs]  # HARDCODED
+        idx = dist.argsort()[: M * self.N_membs]  # M IS HARDCODED
         # Center in Plx
         plx_c = np.median(Plx[idx])
 
@@ -248,10 +273,11 @@ class fastMP:
         dist = cdist(data, cent).T[0]
         # Sort by smallest distance
         d_idxs = dist.argsort()
+        dist_sorted = dist[d_idxs]
 
-        return d_idxs
+        return d_idxs, dist_sorted
 
-    def getStars(self, rads, Kest, C_thresh_N, lon, lat, d_idxs):
+    def getStars(self, rads, Kest, C_thresh_N, lon, lat, d_idxs, dist_sorted):
         """
         Parameters
         ----------
@@ -286,7 +312,7 @@ class fastMP:
             if not np.isnan(C_s):
                 if C_s >= C_thresh:
                     # Cluster survived
-                    N_break = 0
+                    N_break = 0  # Reset
                     idxs_survived += list(msk)
                 else:
                     N_break += 1
@@ -294,10 +320,58 @@ class fastMP:
                 break
             step_old = step
 
-        return idxs_survived
+        # return idxs_survived
+        if not idxs_survived:
+            return []
+
+        if len(idxs_survived) <= self.N_membs:
+            return idxs_survived
+
+        # cxy = np.median([[lon[idxs_survived], lat[idxs_survived]]], 2)
+        data = np.array([lon[idxs_survived], lat[idxs_survived]]).T
+        cxy = np.median(data, 0).reshape(1, 2)
+        dist_xy = cdist(data, cxy).T[0]
+
+        # from sklearn.neighbors import LocalOutlierFactor
+        from sklearn.ensemble import IsolationForest
+
+        data = np.array([dist_xy, dist_sorted[idxs_survived]])
+        # y_pred = LocalOutlierFactor().fit_predict(data.T)
+        y_pred = IsolationForest().fit_predict(data.T)
+        msk = y_pred > 0
+
+        # plt.scatter(dist_xy, dist_sorted[idxs_survived])
+        # plt.scatter(dist_xy[msk], dist_sorted[idxs_survived][msk], c='r')
+        # plt.scatter(dist_xy[msk2], dist_sorted[idxs_survived][msk2], marker='x', c='k')
+        # plt.show()
+
+        return list(np.array(idxs_survived)[msk])
+
+        # rad = np.median(dist) + 2 * np.std(dist)
+        # msk = dist < rad
+        # return list(np.array(idxs_survived)[msk])
+
+        # N_stars = len(idxs_survived)
+        # idxs_survived_ran = []
+        # for _ in range(100):
+        #     np.random.shuffle(idxs_survived)
+        #     step_old = 0
+        #     for step in np.arange(self.N_membs, N_stars, self.N_membs):
+        #         msk = idxs_survived[step_old:step]
+        #         xy = np.array([lon[msk], lat[msk]]).T
+        #         C_s = self.rkfunc(xy, rads, Kest)
+        #         if not np.isnan(C_s):
+        #             if C_s >= C_thresh:
+        #                 idxs_survived_ran += list(msk)
+        #         step_old = step
+
+        # values, counts = np.unique(idxs_survived_ran, return_counts=True)
+        # probs = counts / 100
+        # msk = probs > .5
+
+        # return list(values[msk])
 
         # N_stars = len(lon)
-
         # # Estimate average C_s of large distance stars
         # C_S_field = []
 
@@ -319,10 +393,10 @@ class fastMP:
 
         # # This value is associated to the field stars' distribution. When it
         # # is achieved, the block below breaks out, having achieved the value
-        # # associated to the field distribution. The larger this value,
+        # # associated to the field distribution. The smaller this value,
         # # the more stars will be included in the members selection returned.
         # if C_S_field:
-        #     C_thresh = np.median(C_S_field)
+        #     C_thresh = np.median(C_S_field) # - 2*np.std(C_S_field)
         # else:
         #     C_thresh = np.inf
 
@@ -338,7 +412,58 @@ class fastMP:
         #             break
         #     step_old = step
 
-        # return d_idxs[:step]
+        # return list(d_idxs[:step])
+
+    # def getGMM(
+    #     self, rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx,
+    #         minStars=10, maxStars=5000):
+    #     """
+    #     """
+    #     st_idx = np.array(st_idx)
+
+    #     cl_data = np.array([s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx]]).T
+    #     lon_i, lat_i = lon[st_idx], lat[st_idx]
+
+    #     # Number of clusters
+    #     n_clusters = min(1000, max(2, int(cl_data.shape[0] / self.N_membs)))
+
+    #     import sklearn.mixture as skmixture
+    #     model = skmixture.GaussianMixture()
+    #     # model.set_params(**cl_method_pars)
+    #     model.n_components = n_clusters
+    #     model.fit(cl_data)
+    #     labels = model.predict(cl_data)
+
+    #     # labels = self.voronoi(cl_data, self.N_membs, n_clusters, maxStars)
+
+    #     idxs_survived = []
+    #     for i in range(labels.min(), labels.max() + 1):
+    #         # Separate stars assigned to this label
+    #         msk = labels == i
+    #         # Not enough elements or too many, skip this cluster
+    #         if msk.sum() < minStars or msk.sum() > maxStars:
+    #             continue
+
+    #         C_thresh = 1.68 * C_thresh_N / msk.sum()
+
+    #         xy = np.array([lon_i[msk], lat_i[msk]]).T
+    #         C_s = self.rkfunc(xy, rads, Kest)
+    #         if not np.isnan(C_s):
+    #             if C_s >= C_thresh:
+    #                 # Cluster survived
+    #                 idxs_survived += list(st_idx[msk])
+
+    #     # plt.subplot(121)
+    #     # plt.scatter(lon_i, lat_i, c='b', alpha=.5)
+    #     # plt.scatter(lon[np.array(idxs_survived)], lat[np.array(idxs_survived)], c='r', alpha=.5)
+    #     # plt.xlim(min(lon), max(lon))
+    #     # plt.ylim(min(lat), max(lat))
+    #     # plt.subplot(122)
+    #     # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], c='b', alpha=.5)
+    #     # plt.scatter(s_pmRA[np.array(idxs_survived)], s_pmDE[np.array(idxs_survived)], c='r', alpha=.5)
+    #     # plt.show()
+
+    #     return len(set(labels)), idxs_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
@@ -393,133 +518,18 @@ class fastMP:
 
     #     return list(idxs)
 
-    def assignProbs(self, msk_nonans, idx_selected):
+    def assignProbs(self, msk_accpt, idx_selected):
         """
         """
-        N_stars_nonan = msk_nonans.sum()
+        N_stars = msk_accpt.sum()
         # Assign probabilities as averages of counts
         values, counts = np.unique(idx_selected, return_counts=True)
         probs = counts / self.N_resample
-        probs_all = np.zeros(N_stars_nonan)
+        probs_all = np.zeros(N_stars)
         probs_all[values] = probs
 
         # Mark nans with '-1'
-        probs_final = np.zeros(len(msk_nonans)) - 1
-        probs_final[msk_nonans] = probs_all
+        probs_final = np.zeros(len(msk_accpt)) - 1
+        probs_final[msk_accpt] = probs_all
 
         return probs_final
-
-    # def bayesianProbs(self, probs, mag, e_mag, col, e_col, N_runs=100):
-    #     """
-    #     """
-    #     # Combine photometry and uncertainties.
-    #     data = np.array([mag, col])
-    #     # Uncertainties are squared in dataNorm()
-    #     e_data = np.array([np.square(e_mag), np.square(e_col)])
-    #     # Generate array with the appropriate format.
-    #     data_prep = np.stack((data, e_data)).T
-
-    #     # Generate cluster sequence from P>0.5 stars
-    #     msk = probs > 0.5
-
-    #     cluster = data_prep[msk]
-    #     all_fields = data_prep[~msk]
-    #     N_cl, N_fl = msk.sum(), (~msk).sum()
-
-    #     #
-    #     bayes_prob_all = []
-    #     for _ in range(N_runs):
-
-    #         cl_msk = np.random.choice(N_cl, N_cl)
-    #         cl_lkl = self.likelihood(cluster[cl_msk], cluster)
-
-    #         # Generate a random field sequence
-    #         fl_msk = np.random.choice(N_fl, N_cl)
-    #         field = all_fields[fl_msk]
-
-    #         fl_lkl = self.likelihood(field, cluster)
-
-    #         # Bayesian probability for each star within the cluster region.
-    #         bayes_prob = 1. / (1. + (fl_lkl / cl_lkl))
-
-    #         bayes_prob_all.append(bayes_prob)
-
-    #     # Average all Bayesian membership probabilities into a single value for
-    #     # each star inside 'cl_region'.
-    #     probs_bys = 1. * probs
-    #     probs_bys[msk] = np.mean(bayes_prob_all, 0)
-
-    #     # plt.subplot(221)
-    #     # plt.scatter(probs_final, probs_final_bys)
-    #     # plt.xlim(.5, 1.05)
-    #     # plt.subplot(222)
-    #     # plt.hist(probs_final[msk], alpha=.5, label='old')
-    #     # plt.hist(probs_final_bys[msk], alpha=.5, label='new')
-    #     # plt.legend()
-    #     # # plt.xlim(.5, 1.05)
-    #     # plt.subplot(223)
-    #     # plt.title('old')
-    #     # plt.scatter(col[msk], mag[msk], c=probs_final[msk], alpha=.8)
-    #     # plt.colorbar()
-    #     # plt.gca().invert_yaxis()
-    #     # plt.subplot(224)
-    #     # plt.title('new')
-    #     # plt.scatter(col[msk], mag[msk], c=probs, alpha=.8)
-    #     # plt.colorbar()
-    #     # plt.gca().invert_yaxis()
-    #     # plt.show()
-    #     # breakpoint()
-
-    #     return probs_bys
-
-    # def likelihood(self, region, cl_reg_prep):
-    #     """
-    #     Obtain the likelihood, for each star in the cluster region ('cl_reg_prep'),
-    #     of being a member of the region passed ('region').
-
-    #     This is basically the core of the 'tolstoy' likelihood with some added
-    #     weights.
-
-    #     L_i = w_i \sum_{j=1}^{N_r}
-    #              \frac{w_j}{\sqrt{\prod_{k=1}^d \sigma_{ijk}^2}}\;\;
-    #                 exp \left[-\frac{1}{2} \sum_{k=1}^d
-    #                    \frac{(q_{ik}-q_{jk})^2}{\sigma_{ijk}^2} \right ]
-
-    #     where
-    #     i: cluster region star
-    #     j: field region star
-    #     k: data dimension
-    #     L_i: likelihood for star i in the cluster region
-    #     N_r: number of stars in field region
-    #     d: number of data dimensions
-    #     \sigma_{ijk}^2: sum of squared uncertainties for stars i,j in
-    #                     dimension k
-    #     q_{ik}: data for star i in dimension k
-    #     q_{jk}: data for star j in dimension k
-
-    #     """
-    #     # Data difference (cluster_region - region), for all dimensions.
-    #     data_dif = cl_reg_prep[:, None, :, 0] - region[None, :, :, 0]
-    #     # Sum of squared errors, for all dimensions.
-    #     sigma_sum = cl_reg_prep[:, None, :, 1] + region[None, :, :, 1]
-
-    #     # # Handle 'nan' values.
-    #     # data_dif[np.isnan(data_dif)] = 0.
-    #     # sigma_sum[np.isnan(sigma_sum)] = 1.
-
-    #     # Sum for all dimensions.
-    #     Dsum = (np.square(data_dif) / sigma_sum).sum(axis=-1)
-    #     # This makes the code substantially faster.
-    #     np.clip(Dsum, a_min=None, a_max=50., out=Dsum)
-
-    #     # Product of summed squared sigmas.
-    #     sigma_prod = np.prod(sigma_sum, axis=-1)
-
-    #     # All elements inside summatory.
-    #     sum_M_j = np.exp(-0.5 * Dsum) / np.sqrt(sigma_prod)
-
-    #     # Sum for all stars in this 'region'.
-    #     sum_M = np.sum(sum_M_j, axis=-1)
-    #     # np.clip(sum_M, a_min=1e-7, a_max=None, out=sum_M)
-
-    #     return sum_M
