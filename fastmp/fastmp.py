@@ -54,8 +54,6 @@ class fastMP:
     def fit(self, X):
         """
         """
-        # msk_nonans, X = self.remNans(X)
-        # print(X.shape, msk_nonans.sum())
         # Remove outliers and nans
         msk_accpt, X = self.outlRjct(X)
 
