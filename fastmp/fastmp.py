@@ -110,18 +110,6 @@ class fastMP:
 
         return probs_final
 
-    # def remNans(self, X):
-    #     """
-    #     Remove nans
-    #     """
-    #     msk = [False for _ in range(len(X[0]))]
-    #     for dim in X:
-    #         msk = msk | np.isnan(dim)
-    #     msk_nonans = ~msk
-    #     X_nonans = np.array([_[msk_nonans] for _ in X])
-
-    #     return msk_nonans, X_nonans
-
     def outlRjct(self, data, nstd=5):
         """
         Remove outliers and nans
@@ -162,7 +150,7 @@ class fastMP:
         """
         Gaussian random sample
         """
-        grs = np.random.normal(0., 1., data_3.shape[1]) * .1
+        grs = np.random.normal(0., 1., data_3.shape[1]) * .25
         return data_3 + grs * data_err
 
     def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
@@ -413,57 +401,6 @@ class fastMP:
         #     step_old = step
 
         # return list(d_idxs[:step])
-
-    # def getGMM(
-    #     self, rads, Kest, C_thresh_N, lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx,
-    #         minStars=10, maxStars=5000):
-    #     """
-    #     """
-    #     st_idx = np.array(st_idx)
-
-    #     cl_data = np.array([s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx]]).T
-    #     lon_i, lat_i = lon[st_idx], lat[st_idx]
-
-    #     # Number of clusters
-    #     n_clusters = min(1000, max(2, int(cl_data.shape[0] / self.N_membs)))
-
-    #     import sklearn.mixture as skmixture
-    #     model = skmixture.GaussianMixture()
-    #     # model.set_params(**cl_method_pars)
-    #     model.n_components = n_clusters
-    #     model.fit(cl_data)
-    #     labels = model.predict(cl_data)
-
-    #     # labels = self.voronoi(cl_data, self.N_membs, n_clusters, maxStars)
-
-    #     idxs_survived = []
-    #     for i in range(labels.min(), labels.max() + 1):
-    #         # Separate stars assigned to this label
-    #         msk = labels == i
-    #         # Not enough elements or too many, skip this cluster
-    #         if msk.sum() < minStars or msk.sum() > maxStars:
-    #             continue
-
-    #         C_thresh = 1.68 * C_thresh_N / msk.sum()
-
-    #         xy = np.array([lon_i[msk], lat_i[msk]]).T
-    #         C_s = self.rkfunc(xy, rads, Kest)
-    #         if not np.isnan(C_s):
-    #             if C_s >= C_thresh:
-    #                 # Cluster survived
-    #                 idxs_survived += list(st_idx[msk])
-
-    #     # plt.subplot(121)
-    #     # plt.scatter(lon_i, lat_i, c='b', alpha=.5)
-    #     # plt.scatter(lon[np.array(idxs_survived)], lat[np.array(idxs_survived)], c='r', alpha=.5)
-    #     # plt.xlim(min(lon), max(lon))
-    #     # plt.ylim(min(lat), max(lat))
-    #     # plt.subplot(122)
-    #     # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], c='b', alpha=.5)
-    #     # plt.scatter(s_pmRA[np.array(idxs_survived)], s_pmDE[np.array(idxs_survived)], c='r', alpha=.5)
-    #     # plt.show()
-
-    #     return len(set(labels)), idxs_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
