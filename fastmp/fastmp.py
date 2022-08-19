@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator, histogram
 from scipy.spatial.distance import cdist
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 import matplotlib.pyplot as plt
 
@@ -59,11 +59,6 @@ class fastMP:
 
         # Prepare input data
         lon, lat, pmRA, e_pmRA, pmDE, e_pmDE, plx, e_plx = X
-
-        # xy_data = np.array([lon, lat]).T
-        # _xrange, _yrange = np.ptp(xy_data, 0)
-        # xy = MinMaxScaler().fit(xy_data).transform(xy_data)
-        # lon, lat = xy.T
 
         rads, Kest, C_thresh_N = self.rkparams(lon, lat)
         data_3 = np.array([pmRA, pmDE, plx])
