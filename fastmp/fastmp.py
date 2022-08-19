@@ -492,67 +492,6 @@ class fastMP:
 
         return C_s
 
-    # def sigmaClip(self, s_pmRA, s_pmDE, s_Plx, st_idx):
-    #     """
-    #     Remove outliers in the VPD+Plx space.
-    #     """
-    #     xyz = np.array([s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx]]).T
-    #     idxs = np.array(st_idx)
-    #     for _ in range(self.N_loop):
-    #         xy_d = cdist(xyz, xyz.mean(0).reshape(-1, 3)).T[0]
-    #         xy_std = xyz.std(0).mean()
-    #         msk_s3 = xy_d < self.N_std * xy_std
-    #         xyz, idxs = xyz[msk_s3], idxs[msk_s3]
-
-    #     return list(idxs)
-
-    # def KDEprobs(self, lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx, Nst_max=5000):
-    #     """
-    #     Assign probabilities to all stars after generating the KDEs for field and
-    #     member stars. The Cluster probability is obtained applying the formula for
-    #     two mutually exclusive and exhaustive hypotheses.
-    #     """
-    #     from scipy.stats import gaussian_kde
-
-    #     if not st_idx:
-    #         return st_idx
-
-    #     # Combine coordinates with the rest of the features.
-    #     all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T
-    #     # Split into the two populations.
-    #     membs_stars = all_data[st_idx]
-    #     msk = np.array(list(set(set(np.arange(0, len(lon))) - set(st_idx))))
-    #     field_stars = all_data[msk]
-
-    #     # To improve the performance, cap the number of stars using a random
-    #     # selection of 'Nf_max' elements.
-    #     if field_stars.shape[0] > Nst_max:
-    #         idxs = np.arange(field_stars.shape[0])
-    #         np.random.shuffle(idxs)
-    #         field_stars = field_stars[idxs[:Nst_max]]
-
-    #     # Evaluate all stars in both KDEs
-    #     # try:
-    #     kd_field = gaussian_kde(field_stars.T)
-    #     kd_memb = gaussian_kde(membs_stars.T)
-
-    #     L_memb = kd_memb.evaluate(all_data.T) + 1e-6
-    #     L_field = kd_field.evaluate(all_data.T) + 1e-6
-
-    #     # with warnings.catch_warnings():
-    #     #     warnings.simplefilter("ignore")
-    #     # Probabilities for mutually exclusive and exhaustive
-    #     # hypotheses
-    #     cl_probs = 1. / (1. + (L_field / L_memb))
-
-    #     # except (np.linalg.LinAlgError, ValueError):
-    #     #     pass
-
-    #     msk = cl_probs[st_idx] > 0.5
-    #     st_idx = list(np.array(st_idx)[msk])
-
-    #     return st_idx
-
     def assignProbs(self, msk_accpt, idx_selected):
         """
         """
