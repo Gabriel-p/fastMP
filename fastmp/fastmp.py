@@ -86,11 +86,6 @@ class fastMP:
             # Most probable members given their coordinates distribution
             st_idx = self.getStars(_, rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
 
-            # # Remove outliers
-            # st_idx = self.sigmaClip(s_pmRA, s_pmDE, s_Plx, st_idx)
-
-            # st_idx = self.KDEprobs(lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx)
-
             idx_selected += st_idx
 
         probs_final = self.assignProbs(msk_accpt, idx_selected)
@@ -317,95 +312,6 @@ class fastMP:
             step_old = step
 
         return idxs_survived
-
-        # # return idxs_survived
-        # if not idxs_survived:
-        #     return []
-
-        # if len(idxs_survived) <= self.N_membs:
-        #     return idxs_survived
-
-        # # cxy = np.median([[lon[idxs_survived], lat[idxs_survived]]], 2)
-        # data = np.array([lon[idxs_survived], lat[idxs_survived]]).T
-        # cxy = np.median(data, 0).reshape(1, 2)
-        # dist_xy = cdist(data, cxy).T[0]
-
-        # # from sklearn.neighbors import LocalOutlierFactor
-        # from sklearn.ensemble import IsolationForest
-
-        # data = np.array([dist_xy, dist_sorted[idxs_survived]])
-        # # y_pred = LocalOutlierFactor().fit_predict(data.T)
-        # y_pred = IsolationForest().fit_predict(data.T)
-        # msk = y_pred > 0
-
-        # # plt.scatter(dist_xy, dist_sorted[idxs_survived])
-        # # plt.scatter(dist_xy[msk], dist_sorted[idxs_survived][msk], c='r')
-        # # plt.scatter(dist_xy[msk2], dist_sorted[idxs_survived][msk2], marker='x', c='k')
-        # # plt.show()
-
-        # return list(np.array(idxs_survived)[msk])
-
-        # rad = np.median(dist) + 2 * np.std(dist)
-        # msk = dist < rad
-        # return list(np.array(idxs_survived)[msk])
-
-        # N_stars = len(idxs_survived)
-        # idxs_survived_ran = []
-        # for _ in range(100):
-        #     np.random.shuffle(idxs_survived)
-        #     step_old = 0
-        #     for step in np.arange(self.N_membs, N_stars, self.N_membs):
-        #         msk = idxs_survived[step_old:step]
-        #         xy = np.array([lon[msk], lat[msk]]).T
-        #         C_s = self.rkfunc(xy, rads, Kest)
-        #         if not np.isnan(C_s):
-        #             if C_s >= C_thresh:
-        #                 idxs_survived_ran += list(msk)
-        #         step_old = step
-
-        # values, counts = np.unique(idxs_survived_ran, return_counts=True)
-        # probs = counts / 100
-        # msk = probs > .5
-
-        # return list(values[msk])
-
-        # N_stars = len(lon)
-        # # Estimate average C_s of large distance stars
-        # C_S_field = []
-        # #
-        # N_low1 = N_stars - self.N_groups_large_dist * self.N_membs
-        # N_low2 = int(N_stars * self.large_dist_perc)
-        # N_low = max(N_low1, N_low2)
-        # if N_low > N_stars - self.N_membs:
-        #     N_low = N_stars - self.N_membs - 1
-        # step_old = -1
-        # for step in np.arange(N_stars - self.N_membs, N_low, -self.N_membs):
-        #     msk = d_idxs[step:step_old]
-        #     xy = np.array([lon[msk], lat[msk]]).T
-        #     C_s = self.rkfunc(xy, rads, Kest)
-        #     if not np.isnan(C_s):
-        #         C_S_field.append(C_s)
-        #     step_old = step
-        # # This value is associated to the field stars' distribution. When it
-        # # is achieved, the block below breaks out, having achieved the value
-        # # associated to the field distribution. The smaller this value,
-        # # the more stars will be included in the members selection returned.
-        # if C_S_field:
-        #     C_thresh = np.median(C_S_field) + np.std(C_S_field)
-        # else:
-        #     C_thresh = np.inf
-        # # Find Ripley's K value where the stars differ from the estimated
-        # # field value
-        # step_old = 0
-        # for step in np.arange(self.N_membs, N_stars, self.N_membs):
-        #     msk = d_idxs[step_old:step]
-        #     xy = np.array([lon[msk], lat[msk]]).T
-        #     C_s = self.rkfunc(xy, rads, Kest)
-        #     if not np.isnan(C_s):
-        #         if C_s < C_thresh:
-        #             break
-        #     step_old = step
-        # return list(d_idxs[:step])
 
     def rkfunc(self, xy, rads, Kest):
         """
