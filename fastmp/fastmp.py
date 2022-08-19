@@ -1,7 +1,7 @@
 
 import warnings
 import numpy as np
-from astropy.stats import RipleysKEstimator, histogram
+from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import StandardScaler
 
@@ -82,17 +82,6 @@ class fastMP:
             # Obtain indexes of stars closest to the VPD+Plx center
             cent_all = np.array([vpd_c[0], vpd_c[1], plx_c])
             dist_idxs, dist_sorted = self.getDists(s_pmRA, s_pmDE, s_Plx, cent_all)
-
-            # fig, ax = plt.subplots()
-            # plt.scatter(mag[dist_idxs], dist_sorted)
-            # # _, xedges = histogram(dist_sorted, bins='knuth')
-            # # _, yedges = histogram(mag, bins='knuth')
-            # # ax.set_xticks(xedges, minor=False)
-            # # ax.set_yticks(yedges, minor=False)
-            # # ax.xaxis.grid(True, which='major')
-            # # ax.yaxis.grid(True, which='major')
-            # plt.show()
-            # breakpoint()
 
             # Most probable members given their coordinates distribution
             st_idx = self.getStars(_, rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
