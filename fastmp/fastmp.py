@@ -284,7 +284,7 @@ class fastMP:
         C_thresh = C_thresh_N / N_clust
         # Select those clusters where the stars are different enough from a
         # random distribution
-        N_break, step_old = 0, 0
+        step_old = 0
         idxs_survived, last_dists = [], [100000]
         ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
@@ -300,13 +300,7 @@ class fastMP:
                     ld_avrg, ld_std = np.median(last_dists), np.std(last_dists)
                     last_dists = 1. * dist_sorted[step_old:step]
 
-                    N_break = 0  # Reset
                     idxs_survived += list(msk)
-                else:
-                    N_break += 1
-            # if N_break > 100:
-            #     print("N break")
-            #     break
             if d_avrg > ld_avrg + 5 * ld_std:
                 break
             step_old = step
