@@ -107,36 +107,6 @@ class fastMP:
 
             # st_idx = self.KDEprobs(lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx)
 
-            # msk = np.array(list(set(set(np.arange(0, len(lon))) - set(st_idx))))
-            # photom = np.array([mag, col]).T
-            # field = photom[msk]
-            # cluster = photom[st_idx]
-            # from scipy import spatial
-            # # Find NN_dd nearest neighbors.
-            # tree = spatial.cKDTree(cluster)
-            # inx_c = tree.query(cluster, k=50)[0]
-            # c_dist = np.median(inx_c, 1)
-            # msk_all = []
-            # for _ in range(100):
-            #     i_field = np.random.choice(
-            #         np.arange(0, len(field)), len(cluster), replace=False)
-            #     s_field = field[i_field]
-            #     inx_f = tree.query(s_field, k=50)[0]
-            #     # Mean distance to the NN_dd neighbors.
-            #     f_dist = np.median(inx_f, 1)
-            #     msk = c_dist <= f_dist
-            #     msk_all.append(msk)
-            #     print(msk.sum())
-            # msk_all = np.array(msk_all)
-            # msk = msk_all.mean(0) > .1
-            # # plt.scatter(s_field.T[1], s_field.T[0], c='grey', alpha=.5)
-            # # plt.scatter(cluster.T[1][msk], cluster.T[0][msk], c='g', alpha=.5)
-            # # plt.scatter(cluster.T[1][~msk], cluster.T[0][~msk], c='r', alpha=.5)
-            # # plt.gca().invert_yaxis()
-            # # plt.show()
-            # # breakpoint()
-            # st_idx = list(np.array(st_idx)[msk])
-
             idx_selected += st_idx
 
         probs_final = self.assignProbs(msk_accpt, idx_selected)
