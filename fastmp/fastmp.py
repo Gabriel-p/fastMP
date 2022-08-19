@@ -1,9 +1,9 @@
 
 import warnings
 import numpy as np
-from astropy.stats import RipleysKEstimator
+from astropy.stats import RipleysKEstimator, histogram
 from scipy.spatial.distance import cdist
-# from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 import matplotlib.pyplot as plt
 
@@ -37,14 +37,14 @@ class fastMP:
 
     def __init__(self,
                  N_membs=25,
-                 # N_groups_large_dist=100,
-                 # large_dist_perc=0.75,
-                 N_resample=100,
+                 N_groups_large_dist=100,
+                 large_dist_perc=0.75,
+                 N_resample=25,
                  N_loop=2,
                  N_std=3,
                  vpd_c=None):
-        # self.N_groups_large_dist = N_groups_large_dist
-        # self.large_dist_perc = large_dist_perc
+        self.N_groups_large_dist = N_groups_large_dist
+        self.large_dist_perc = large_dist_perc
         self.N_resample = N_resample
         self.N_membs = N_membs
         self.N_loop = N_loop
@@ -69,25 +69,73 @@ class fastMP:
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
+        # Estimate VPD center
+        vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
+        # Estimate Plx center
+        plx_c = self.centPlx(pmRA, pmDE, plx, vpd_c)
+
         idx_selected = []
         for _ in range(self.N_resample):
             # Sample data
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
-            # Estimate VPD center
-            vpd_c = self.centVPD(np.array([s_pmRA, s_pmDE]).T)
-            # Estimate Plx center
-            plx_c = self.centPlx(s_pmRA, s_pmDE, s_Plx, vpd_c)
+            # # Estimate VPD center
+            # vpd_c = self.centVPD(np.array([s_pmRA, s_pmDE]).T)
+            # # Estimate Plx center
+            # plx_c = self.centPlx(s_pmRA, s_pmDE, s_Plx, vpd_c)
 
             # Obtain indexes of stars closest to the VPD+Plx center
             cent_all = np.array([vpd_c[0], vpd_c[1], plx_c])
             dist_idxs, dist_sorted = self.getDists(s_pmRA, s_pmDE, s_Plx, cent_all)
 
+            # fig, ax = plt.subplots()
+            # plt.scatter(mag[dist_idxs], dist_sorted)
+            # # _, xedges = histogram(dist_sorted, bins='knuth')
+            # # _, yedges = histogram(mag, bins='knuth')
+            # # ax.set_xticks(xedges, minor=False)
+            # # ax.set_yticks(yedges, minor=False)
+            # # ax.xaxis.grid(True, which='major')
+            # # ax.yaxis.grid(True, which='major')
+            # plt.show()
+            # breakpoint()
+
             # Most probable members given their coordinates distribution
-            st_idx = self.getStars(rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
+            st_idx = self.getStars(_, rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
 
             # # Remove outliers
             # st_idx = self.sigmaClip(s_pmRA, s_pmDE, s_Plx, st_idx)
+
+            # st_idx = self.KDEprobs(lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx)
+
+            # msk = np.array(list(set(set(np.arange(0, len(lon))) - set(st_idx))))
+            # photom = np.array([mag, col]).T
+            # field = photom[msk]
+            # cluster = photom[st_idx]
+            # from scipy import spatial
+            # # Find NN_dd nearest neighbors.
+            # tree = spatial.cKDTree(cluster)
+            # inx_c = tree.query(cluster, k=50)[0]
+            # c_dist = np.median(inx_c, 1)
+            # msk_all = []
+            # for _ in range(100):
+            #     i_field = np.random.choice(
+            #         np.arange(0, len(field)), len(cluster), replace=False)
+            #     s_field = field[i_field]
+            #     inx_f = tree.query(s_field, k=50)[0]
+            #     # Mean distance to the NN_dd neighbors.
+            #     f_dist = np.median(inx_f, 1)
+            #     msk = c_dist <= f_dist
+            #     msk_all.append(msk)
+            #     print(msk.sum())
+            # msk_all = np.array(msk_all)
+            # msk = msk_all.mean(0) > .1
+            # # plt.scatter(s_field.T[1], s_field.T[0], c='grey', alpha=.5)
+            # # plt.scatter(cluster.T[1][msk], cluster.T[0][msk], c='g', alpha=.5)
+            # # plt.scatter(cluster.T[1][~msk], cluster.T[0][~msk], c='r', alpha=.5)
+            # # plt.gca().invert_yaxis()
+            # # plt.show()
+            # # breakpoint()
+            # st_idx = list(np.array(st_idx)[msk])
 
             idx_selected += st_idx
 
@@ -95,7 +143,7 @@ class fastMP:
 
         return probs_final
 
-    def outlRjct(self, data, nstd=5):
+    def outlRjct(self, data, nstd=50):
         """
         Remove outliers and nans
         """
@@ -135,7 +183,7 @@ class fastMP:
         """
         Gaussian random sample
         """
-        grs = np.random.normal(0., 1., data_3.shape[1]) * .25
+        grs = np.random.normal(0., 1., data_3.shape[1]) * 0
         return data_3 + grs * data_err
 
     def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
@@ -227,17 +275,27 @@ class fastMP:
 
         return plx_c
 
-    def getDists(self, pmRA, pmDE, Plx, cent):
+    def getDists(self, pmRA, pmDE, Plx, cent, norm=True):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
-        # # Normalize
-        # data = np.concatenate((np.array(
-        #     [pmRA, pmDE, Plx]), cent.reshape(3, -1)), 1).T
-        # data = StandardScaler().fit(data).transform(data)
-        # cent = data[-1]
-        # pmRA, pmDE, Plx = data[:-1].T
+        # Normalize
+        if norm:
+            data = np.concatenate((np.array(
+                [pmRA, pmDE, Plx]), cent.reshape(3, -1)), 1).T
+
+            data0 = StandardScaler().fit(data).transform(data)
+
+            data -= data.mean()
+            data /= data.std()
+
+            if not np.allclose(data0, data):
+                print("problem with scaler")
+                breakpoint()
+
+            cent = data[-1]
+            pmRA, pmDE, Plx = data[:-1].T
 
         # 3D distance to the estimated (VPD + Plx) center
         cent = cent.reshape(1, 3)
@@ -250,7 +308,7 @@ class fastMP:
 
         return d_idxs, dist_sorted
 
-    def getStars(self, rads, Kest, C_thresh_N, lon, lat, d_idxs, dist_sorted):
+    def getStars(self, i, rads, Kest, C_thresh_N, lon, lat, d_idxs, dist_sorted):
         """
         Parameters
         ----------
@@ -271,54 +329,67 @@ class fastMP:
             Description
         """
 
-        N_stars = len(lon)
-        C_thresh = C_thresh_N / self.N_membs
+        N_clust = self.N_membs + i
 
+        N_stars = len(lon)
+        C_thresh = C_thresh_N / N_clust
         # Select those clusters where the stars are different enough from a
         # random distribution
         N_break, step_old = 0, 0
-        idxs_survived = []
-        for step in np.arange(self.N_membs, N_stars, self.N_membs):
+        idxs_survived, last_dists = [], [100000]
+        ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
             xy = np.array([lon[msk], lat[msk]]).T
+
             C_s = self.rkfunc(xy, rads, Kest)
             if not np.isnan(C_s):
+                # Cluster survived
                 if C_s >= C_thresh:
-                    # Cluster survived
+
+                    d_avrg = np.median(dist_sorted[step_old:step])
+                    ld_avrg, ld_std = np.median(last_dists), np.std(last_dists)
+                    last_dists = 1. * dist_sorted[step_old:step]
+
                     N_break = 0  # Reset
                     idxs_survived += list(msk)
                 else:
                     N_break += 1
-            if N_break > 100:
+            # if N_break > 100:
+            #     print("N break")
+            #     break
+            if d_avrg > ld_avrg + 5 * ld_std:
                 break
             step_old = step
 
-        # return idxs_survived
-        if not idxs_survived:
-            return []
+        return idxs_survived
 
-        if len(idxs_survived) <= self.N_membs:
-            return idxs_survived
+        # # return idxs_survived
+        # if not idxs_survived:
+        #     return []
 
-        # cxy = np.median([[lon[idxs_survived], lat[idxs_survived]]], 2)
-        data = np.array([lon[idxs_survived], lat[idxs_survived]]).T
-        cxy = np.median(data, 0).reshape(1, 2)
-        dist_xy = cdist(data, cxy).T[0]
+        # if len(idxs_survived) <= self.N_membs:
+        #     return idxs_survived
 
-        # from sklearn.neighbors import LocalOutlierFactor
-        from sklearn.ensemble import IsolationForest
+        # # cxy = np.median([[lon[idxs_survived], lat[idxs_survived]]], 2)
+        # data = np.array([lon[idxs_survived], lat[idxs_survived]]).T
+        # cxy = np.median(data, 0).reshape(1, 2)
+        # dist_xy = cdist(data, cxy).T[0]
 
-        data = np.array([dist_xy, dist_sorted[idxs_survived]])
-        # y_pred = LocalOutlierFactor().fit_predict(data.T)
-        y_pred = IsolationForest().fit_predict(data.T)
-        msk = y_pred > 0
+        # # from sklearn.neighbors import LocalOutlierFactor
+        # from sklearn.ensemble import IsolationForest
 
-        # plt.scatter(dist_xy, dist_sorted[idxs_survived])
-        # plt.scatter(dist_xy[msk], dist_sorted[idxs_survived][msk], c='r')
-        # plt.scatter(dist_xy[msk2], dist_sorted[idxs_survived][msk2], marker='x', c='k')
-        # plt.show()
+        # data = np.array([dist_xy, dist_sorted[idxs_survived]])
+        # # y_pred = LocalOutlierFactor().fit_predict(data.T)
+        # y_pred = IsolationForest().fit_predict(data.T)
+        # msk = y_pred > 0
 
-        return list(np.array(idxs_survived)[msk])
+        # # plt.scatter(dist_xy, dist_sorted[idxs_survived])
+        # # plt.scatter(dist_xy[msk], dist_sorted[idxs_survived][msk], c='r')
+        # # plt.scatter(dist_xy[msk2], dist_sorted[idxs_survived][msk2], marker='x', c='k')
+        # # plt.show()
+
+        # return list(np.array(idxs_survived)[msk])
 
         # rad = np.median(dist) + 2 * np.std(dist)
         # msk = dist < rad
@@ -347,14 +418,12 @@ class fastMP:
         # N_stars = len(lon)
         # # Estimate average C_s of large distance stars
         # C_S_field = []
-
         # #
         # N_low1 = N_stars - self.N_groups_large_dist * self.N_membs
         # N_low2 = int(N_stars * self.large_dist_perc)
         # N_low = max(N_low1, N_low2)
         # if N_low > N_stars - self.N_membs:
         #     N_low = N_stars - self.N_membs - 1
-
         # step_old = -1
         # for step in np.arange(N_stars - self.N_membs, N_low, -self.N_membs):
         #     msk = d_idxs[step:step_old]
@@ -363,16 +432,14 @@ class fastMP:
         #     if not np.isnan(C_s):
         #         C_S_field.append(C_s)
         #     step_old = step
-
         # # This value is associated to the field stars' distribution. When it
         # # is achieved, the block below breaks out, having achieved the value
         # # associated to the field distribution. The smaller this value,
         # # the more stars will be included in the members selection returned.
         # if C_S_field:
-        #     C_thresh = np.median(C_S_field) # - 2*np.std(C_S_field)
+        #     C_thresh = np.median(C_S_field) + np.std(C_S_field)
         # else:
         #     C_thresh = np.inf
-
         # # Find Ripley's K value where the stars differ from the estimated
         # # field value
         # step_old = 0
@@ -384,7 +451,6 @@ class fastMP:
         #         if C_s < C_thresh:
         #             break
         #     step_old = step
-
         # return list(d_idxs[:step])
 
     def rkfunc(self, xy, rads, Kest):
@@ -439,6 +505,53 @@ class fastMP:
     #         xyz, idxs = xyz[msk_s3], idxs[msk_s3]
 
     #     return list(idxs)
+
+    # def KDEprobs(self, lon, lat, s_pmRA, s_pmDE, s_Plx, st_idx, Nst_max=5000):
+    #     """
+    #     Assign probabilities to all stars after generating the KDEs for field and
+    #     member stars. The Cluster probability is obtained applying the formula for
+    #     two mutually exclusive and exhaustive hypotheses.
+    #     """
+    #     from scipy.stats import gaussian_kde
+
+    #     if not st_idx:
+    #         return st_idx
+
+    #     # Combine coordinates with the rest of the features.
+    #     all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T
+    #     # Split into the two populations.
+    #     membs_stars = all_data[st_idx]
+    #     msk = np.array(list(set(set(np.arange(0, len(lon))) - set(st_idx))))
+    #     field_stars = all_data[msk]
+
+    #     # To improve the performance, cap the number of stars using a random
+    #     # selection of 'Nf_max' elements.
+    #     if field_stars.shape[0] > Nst_max:
+    #         idxs = np.arange(field_stars.shape[0])
+    #         np.random.shuffle(idxs)
+    #         field_stars = field_stars[idxs[:Nst_max]]
+
+    #     # Evaluate all stars in both KDEs
+    #     # try:
+    #     kd_field = gaussian_kde(field_stars.T)
+    #     kd_memb = gaussian_kde(membs_stars.T)
+
+    #     L_memb = kd_memb.evaluate(all_data.T) + 1e-6
+    #     L_field = kd_field.evaluate(all_data.T) + 1e-6
+
+    #     # with warnings.catch_warnings():
+    #     #     warnings.simplefilter("ignore")
+    #     # Probabilities for mutually exclusive and exhaustive
+    #     # hypotheses
+    #     cl_probs = 1. / (1. + (L_field / L_memb))
+
+    #     # except (np.linalg.LinAlgError, ValueError):
+    #     #     pass
+
+    #     msk = cl_probs[st_idx] > 0.5
+    #     st_idx = list(np.array(st_idx)[msk])
+
+    #     return st_idx
 
     def assignProbs(self, msk_accpt, idx_selected):
         """
