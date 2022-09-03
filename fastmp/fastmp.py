@@ -3,52 +3,24 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
-from sklearn.preprocessing import StandardScaler
 
 import matplotlib.pyplot as plt
 
+
 class fastMP:
-    """
-    Attributes
-    ----------
-    large_dist_perc : TYPE
-        Description
-    n_clusters : TYPE
-        Description
-    N_groups_large_dist : TYPE
-        Description
-    N_loop : TYPE
-        Description
-    N_membs : TYPE
-        Description
-    N_resample : TYPE
-        Description
-    N_std : TYPE
-        Description
-    N_zoom : TYPE
-        Description
-    read_PM_center : TYPE
-        Description
-    vpd_c : TYPE
-        Description
-    zoom_f : TYPE
-        Description
-    """
 
     def __init__(self,
-                 N_membs=25,
-                 N_groups_large_dist=100,
-                 large_dist_perc=0.75,
-                 N_resample=25,
-                 N_loop=2,
-                 N_std=3,
+                 N_membs_min=25,
+                 N_membs_max=50,
+                 N_resample=0,
+                 N_std_d=5,
+                 N_break=50,
                  vpd_c=None):
-        self.N_groups_large_dist = N_groups_large_dist
-        self.large_dist_perc = large_dist_perc
+        self.N_membs_min = N_membs_min
+        self.N_membs_max = N_membs_max
         self.N_resample = N_resample
-        self.N_membs = N_membs
-        self.N_loop = N_loop
-        self.N_std = N_std
+        self.N_std_d = N_std_d
+        self.N_break = N_break
         self.vpd_c = vpd_c
 
     def fit(self, X):
@@ -57,51 +29,105 @@ class fastMP:
         # Remove outliers and nans
         msk_accpt, X = self.outlRjct(X)
 
-        # Prepare input data
-        lon, lat, pmRA, e_pmRA, pmDE, e_pmDE, plx, e_plx = X
+        # Unpack input data
+        if self.N_resample > 0:
+            lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx, mag, col = X
+        else:
+            lon, lat, pmRA, pmDE, plx, mag, col = X
+            e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
+        # Prepare Ripley's K data
         rads, Kest, C_thresh_N = self.rkparams(lon, lat)
+
+        # Pack PMs+Plx data
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
         # Estimate VPD center
         vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
         # Estimate Plx center
-        plx_c = self.centPlx(pmRA, pmDE, plx, vpd_c)
+        xy_c, plx_c = self.centXYPlx(lon, lat, pmRA, pmDE, plx, vpd_c)
+        print(xy_c, vpd_c, plx_c)
+
+        # cents_old = [[xy_c[0], xy_c[1], vpd_c[0], vpd_c[1], plx_c]]
+        # cent_old = cents_old[0]
+        nruns = 0
+
+        lon_lat = np.array([lon, lat]).T
 
         idx_selected = []
-        for _ in range(self.N_resample):
+        for _ in range(self.N_resample + 1):
             # Sample data
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
-            # # Estimate VPD center
-            # vpd_c = self.centVPD(np.array([s_pmRA, s_pmDE]).T)
-            # # Estimate Plx center
-            # plx_c = self.centPlx(s_pmRA, s_pmDE, s_Plx, vpd_c)
+            for N_clust in range(self.N_membs_min, self.N_membs_max):
 
-            # Obtain indexes of stars closest to the VPD+Plx center
-            cent_all = np.array([vpd_c[0], vpd_c[1], plx_c])
-            dist_idxs, dist_sorted = self.getDists(s_pmRA, s_pmDE, s_Plx, cent_all)
+                # Obtain indexes and distances of stars to the VPD+Plx center
+                d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
+                    lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c, mag, col)
 
-            # Most probable members given their coordinates distribution
-            st_idx = self.getStars(_, rads, Kest, C_thresh_N, lon, lat, dist_idxs, dist_sorted)
+                # Most probable members given their coordinates distribution
+                st_idx = self.getStars(
+                    rads, Kest, C_thresh_N, lon, lat, d_pm_plx_idxs,
+                    d_pm_plx_sorted, N_clust)
 
-            idx_selected += st_idx
+                st_idx = list(d_idxs)[:len(st_idx)]
 
-        probs_final = self.assignProbs(msk_accpt, idx_selected)
+                if st_idx:
+                    # N = len(st_idx)
+                    # plt.subplot(221)
+                    # plt.scatter(lon, lat, s=1, c='grey')
+                    # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5)
+                    # plt.scatter(lon[d_idxs][:N], lat[d_idxs][:N], c='r', alpha=.5)
+                    # plt.subplot(222)
+                    # plt.scatter(s_pmRA, s_pmDE, s=1, c='grey')
+                    # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], alpha=.5)
+                    # plt.scatter(s_pmRA[d_idxs][:N], s_pmDE[d_idxs][:N], c='r', alpha=.5)
+                    # plt.subplot(223)
+                    # # plt.hist(s_Plx[s_Plx < 10], color='grey', alpha=.5, density=True)
+                    # plt.hist(s_Plx[st_idx], color='blue', alpha=.5, density=True)
+                    # plt.hist(s_Plx[d_idxs][:N], color='r', alpha=.5, density=True)
+                    # plt.subplot(224)
+                    # plt.scatter(col, mag, s=1, c='grey')
+                    # plt.scatter(col[st_idx], mag[st_idx], alpha=.5)
+                    # plt.scatter(col[d_idxs][:N], mag[d_idxs][:N], c='r', alpha=.5)
+                    # plt.gca().invert_yaxis()
+                    # plt.show()
+
+                    # Estimate VPD center
+                    vpd_c = self.centVPD(np.array([
+                        s_pmRA[st_idx], s_pmDE[st_idx]]).T)
+                    # Estimate coordinates+Plx center
+                    xy_c, plx_c = self.centXYPlx(
+                        lon[st_idx], lat[st_idx], s_pmRA[st_idx],
+                        s_pmDE[st_idx], s_Plx[st_idx], vpd_c)
+
+                    # cents_old += [[xy_c[0], xy_c[1], vpd_c[0], vpd_c[1], plx_c]]
+                    # cents = np.median(cents_old, 0)
+                    # xy_c = cents[:2]
+                    # vpd_c = cents[2:4]
+                    # plx_c = cents[-1]
+                    # if np.allclose(cent_old, cents, rtol=1e-04) and _ > 10:
+                    #     break
+                    # cent_old = cents
+
+                    print(_, xy_c, vpd_c, plx_c)
+
+                    idx_selected += st_idx
+                nruns += 1
+
+        probs_final = self.assignProbs(msk_accpt, idx_selected, nruns)
 
         return probs_final
 
-    def outlRjct(self, data, nstd=50):
+    def outlRjct(self, data):
         """
         Remove outliers and nans
         """
         msk_all = []
         # Process each dimension separately
         for arr in data:
-            med, std = np.nanmedian(arr), np.nanstd(arr)
-            dmin, dmax = med - nstd * std, med + nstd * std
-            msk = (arr > dmin) & (arr < dmax) & ~np.isnan(arr)
+            msk = ~np.isnan(arr)
             msk_all.append(msk.data)
         # Combine into a single mask
         msk_accpt = np.logical_and.reduce(msk_all)
@@ -110,16 +136,17 @@ class fastMP:
 
     def rkparams(self, lon, lat):
         """
+        https://rdrr.io/cran/spatstat/man/Kest.html
+        "For a rectangular window it is prudent to restrict the r values to a
+        maximum of 1/4 of the smaller side length of the rectangle
+        (Ripley, 1977, 1988; Diggle, 1983)"
+
         """
         xmin, xmax = lon.min(), lon.max()
         ymin, ymax = lat.min(), lat.max()
         area = (xmax - xmin) * (ymax - ymin)
         Kest = RipleysKEstimator(
             area=area, x_max=xmax, y_max=ymax, x_min=xmin, y_min=ymin)
-        # https://rdrr.io/cran/spatstat/man/Kest.html
-        # "For a rectangular window it is prudent to restrict the r values to a
-        # maximum of 1/4 of the smaller side length of the rectangle
-        # (Ripley, 1977, 1988; Diggle, 1983)"
         lmin = min((xmax - xmin), (ymax - ymin))
         rads = np.linspace(lmin * 0.01, lmin * .25, 10)
 
@@ -132,7 +159,9 @@ class fastMP:
         """
         Gaussian random sample
         """
-        grs = np.random.normal(0., 1., data_3.shape[1]) * 0
+        if self.N_resample == 0:
+            return data_3
+        grs = np.random.normal(0., 1., data_3.shape[1])
         return data_3 + grs * data_err
 
     def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
@@ -190,7 +219,7 @@ class fastMP:
 
         return (cx, cy)
 
-    def centPlx(self, pmRA, pmDE, Plx, vpd_c, M=2):
+    def centXYPlx(self, lon, lat, pmRA, pmDE, Plx, vpd_c, M=4):
         """
         Estimate the center of the cluster in parallax.
 
@@ -218,46 +247,180 @@ class fastMP:
         # Distance to VPD center
         dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
         # Closest stars to center
-        idx = dist.argsort()[: M * self.N_membs]  # M IS HARDCODED
+        idx = dist.argsort()[: M * self.N_membs_min]  # M IS HARDCODED
+
         # Center in Plx
-        plx_c = np.median(Plx[idx])
+        # plx_c = np.median(Plx[idx])
 
-        return plx_c
+        # # Center estimated as the  mode
+        # H, ex = np.histogram(Plx[idx])
+        # plx_c = ex[np.argmax(H) + 1]
+        # # Center X
+        # H, ex = np.histogram(lon[idx])
+        # xy_c = [ex[np.argmax(H) + 1]]
+        # # Center Y
+        # H, ex = np.histogram(lat[idx])
+        # xy_c += [ex[np.argmax(H) + 1]]
 
-    def getDists(self, pmRA, pmDE, Plx, cent, norm=True):
+        #
+        H, edge = np.histogramdd([lon[idx], lat[idx], Plx[idx]], 10)
+        idxs = np.unravel_index(H.argmax(), H.shape)
+        xy_c = [edge[0][idxs[0]], edge[1][idxs[1]]]
+        plx_c = edge[2][idxs[2]]
+
+        from scipy import stats
+        x, y, z = lon[idx], lat[idx], Plx[idx]
+        xyz = np.vstack([x, y, z])
+        kde = stats.gaussian_kde(xyz)
+        density = kde(xyz)
+        c1, c2, plx_c = xyz[:, density.argmax()]
+        xy_c = [c1, c2]
+
+        # # Evaluate kde on a grid
+        # xmin, ymin, zmin = x.min(), y.min(), z.min()
+        # xmax, ymax, zmax = x.max(), y.max(), z.max()
+        # xi, yi, zi = np.mgrid[xmin:xmax:10j, ymin:ymax:10j, zmin:zmax:10j]
+        # coords = np.vstack([item.ravel() for item in [xi, yi, zi]]) 
+        # density2 = kde(coords).reshape(xi.shape)
+        # breakpoint()
+
+        return xy_c, plx_c
+
+    def getDists(
+            self, lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c, mag,
+            col):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
-        # Normalize
-        if norm:
-            data = np.concatenate((np.array(
-                [pmRA, pmDE, Plx]), cent.reshape(3, -1)), 1).T
+        dist_xy = cdist(lon_lat, np.array([xy_c])).T[0]
+        dist_pm = cdist(np.array([s_pmRA, s_pmDE]).T, np.array([vpd_c])).T[0]
+        dist_plx = abs(plx_c - s_Plx)
 
-            data0 = StandardScaler().fit(data).transform(data)
+        # The first argsort() returns the indexes ordered by smallest distance,
+        # the second argsort() returns those indexes ordered from min to max.
+        # The resulting arrays contain the position for each element in the
+        # input arrays according to their minimum distances in each dimension
+        dxy_idxs = dist_xy.argsort().argsort()
+        dpm_idxs = dist_pm.argsort().argsort()
+        dplx_idxs = dist_plx.argsort().argsort()
+        # Sum the positions for each element for all the dimensions
+        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        # Sort
+        d_idxs = idx_sum.argsort()
 
-            data -= data.mean()
-            data /= data.std()
+        # Sort distances using only PMs+Plx
+        dist_sum = dist_pm + dist_plx
+        d_pm_plx_idxs = dist_sum.argsort()
+        d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
-            if not np.allclose(data0, data):
-                print("problem with scaler")
-                breakpoint()
+        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
 
-            cent = data[-1]
-            pmRA, pmDE, Plx = data[:-1].T
+        # lon, lat = lon_lat.T
+        # def func(i0, i1):
+        #     plt.subplot(221)
+        #     plt.scatter(lon, lat, s=1, c='grey')
+        #     plt.scatter(lon[d_idxs][i0:i1], lat[d_idxs][i0:i1], alpha=.5)
+        #     # plt.xlim(lon.min(), lon.max())
+        #     # plt.ylim(lat.min(), lat.max())
+        #     plt.subplot(222)
+        #     plt.scatter(s_pmRA, s_pmDE, s=1, c='grey')
+        #     plt.scatter(s_pmRA[d_idxs][i0:i1], s_pmDE[d_idxs][i0:i1], alpha=.5)
+        #     plt.subplot(223)
+        #     plt.hist(s_Plx[s_Plx < 10], color='grey', alpha=.5, density=True)
+        #     plt.hist(s_Plx[d_idxs][i0:i1], color='blue', alpha=.5, density=True)
+        #     plt.subplot(224)
+        #     plt.scatter(col, mag, s=1, c='grey')
+        #     plt.scatter(col[d_idxs][i0:i1], mag[d_idxs][i0:i1])
+        #     plt.gca().invert_yaxis()
+        #     plt.show()
 
-        # 3D distance to the estimated (VPD + Plx) center
-        cent = cent.reshape(1, 3)
-        # Distance of all the stars to the center
-        data = np.array([pmRA, pmDE, Plx]).T
-        dist = cdist(data, cent).T[0]
-        # Sort by smallest distance
-        d_idxs = dist.argsort()
-        dist_sorted = dist[d_idxs]
+        # # func(0, 100)
+        # # breakpoint()
 
-        return d_idxs, dist_sorted
+        # # return d_idxs, dist_sorted
 
-    def getStars(self, i, rads, Kest, C_thresh_N, lon, lat, d_idxs, dist_sorted):
+        # dist_xy_s, dist_pm_s, dist_plx_s = dist_xy[d_idxs],\
+        #     dist_pm[d_idxs], dist_plx[d_idxs]
+
+        # Nd = len(s_Plx)
+
+        # Nstep = 25
+
+        # # # Maximum values
+        # # d1_max = np.median(dist_xy_s[0:Nstep])
+        # # d2_max = np.median(dist_pm_s[0:Nstep])
+        # # d3_max = np.median(dist_plx_s[0:Nstep])
+
+        # # dists_med = []
+        # # step_old = 0
+        # # istep = min(np.percentile(Nd, 10), 1000) # HARDCODED '10', 1000'
+        # # for step in np.arange(Nd - istep, Nd, Nstep):
+        # #     d1 = np.median(dist_xy_s[step_old:step_old + step])
+        # #     d2 = np.median(dist_pm_s[step_old:step_old + step])
+        # #     d3 = np.median(dist_plx_s[step_old:step_old + step])
+        # #     dists_med.append([d1, d2, d3])
+        # #     step_old = step
+        # # dists_med = np.array(dists_med).T
+        # # vals = (d1_max / dists_med[0] + d2_max / dists_med[1] + d3_max / dists_med[2])
+        # # floor = np.median(vals / 3.)
+
+        # dists_med = []
+        # step_old = 0
+        # for step in np.arange(Nstep, 2000, Nstep):
+        #     d1 = np.median(dist_xy_s[:step])
+        #     d1_std = np.std(dist_xy_s[:step])
+        #     d2 = np.median(dist_pm_s[:step])
+        #     d2_std = np.std(dist_pm_s[:step])
+        #     d3 = np.median(dist_plx_s[:step])
+        #     d3_std = np.std(dist_plx_s[:step])
+
+        #     c1 = (((dist_xy_s[step:step + Nstep] - d1) / d1_std) > .5).sum()
+        #     c2 = (((dist_pm_s[step:step + Nstep] - d2) / d2_std) > .5).sum()
+        #     c3 = (((dist_plx_s[step:step + Nstep] - d3) / d3_std) > .5).sum()
+
+        #     print(step_old, step, step + Nstep, c1, c2, c3, c1+c2+c3)
+
+        #     i0, i1, i2 = step_old, step, step + Nstep
+        #     plt.subplot(221)
+        #     plt.scatter(lon, lat, s=1, c='grey')
+        #     plt.scatter(lon[d_idxs][i0:i1], lat[d_idxs][i0:i1], alpha=.5)
+        #     plt.scatter(lon[d_idxs][i1:i2], lat[d_idxs][i1:i2], alpha=.5, c='r')
+        #     plt.subplot(222)
+        #     plt.scatter(s_pmRA, s_pmDE, s=1, c='grey')
+        #     plt.scatter(s_pmRA[d_idxs][i0:i1], s_pmDE[d_idxs][i0:i1], alpha=.5)
+        #     plt.scatter(s_pmRA[d_idxs][i1:i2], s_pmDE[d_idxs][i1:i2], alpha=.5, c='r')
+        #     plt.subplot(223)
+        #     plt.hist(s_Plx[s_Plx < 10], color='grey', alpha=.5, density=True)
+        #     plt.hist(s_Plx[d_idxs][i0:i1], color='blue', alpha=.5, density=True)
+        #     plt.hist(s_Plx[d_idxs][i1:i2], color='r', alpha=.5, density=True)
+        #     plt.subplot(224)
+        #     plt.scatter(col, mag, s=1, c='grey')
+        #     plt.scatter(col[d_idxs][i0:i1], mag[d_idxs][i0:i1], alpha=.5)
+        #     plt.scatter(col[d_idxs][i1:i2], mag[d_idxs][i1:i2], alpha=.5, c='r')
+        #     plt.gca().invert_yaxis()
+        #     plt.show()
+
+        #     # val = (d1_max / d1 + d2_max / d2 + d3_max / d3) / 3.
+        #     # dists_med.append([d1, d2, d3])
+
+        #     step_old = step
+        # breakpoint()
+
+        # dists_med = np.array(dists_med).T
+        # vals = (d1_max / dists_med[0] + d2_max / dists_med[1] + d3_max / dists_med[2]) / 3
+        # plt.plot(vals)
+        # plt.show()
+
+        # breakpoint()
+
+        # Indexes of the elements in the input arrays ordered by the smallest
+        # sum of indexes
+        # final_idxs = idx_sum.argsort().argsort()
+
+        # return final_idxs[:step]
+
+    def getStars(self, rads, Kest, C_thresh_N, lon, lat, d_idxs, d_sorted, N_clust):
         """
         Parameters
         ----------
@@ -277,16 +440,16 @@ class fastMP:
         TYPE
             Description
         """
-
-        N_clust = self.N_membs + i
-
         N_stars = len(lon)
-        C_thresh = C_thresh_N / N_clust
+
         # Select those clusters where the stars are different enough from a
         # random distribution
-        step_old = 0
-        idxs_survived, last_dists = [], [100000]
-        ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        idxs_survived = []
+
+        C_thresh = C_thresh_N / N_clust
+
+        last_dists = [100000]
+        N_break_count, step_old, ld_avrg, ld_std, d_avrg = 0, 0, 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
             xy = np.array([lon[msk], lat[msk]]).T
@@ -295,14 +458,26 @@ class fastMP:
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
-
-                    d_avrg = np.median(dist_sorted[step_old:step])
-                    ld_avrg, ld_std = np.median(last_dists), np.std(last_dists)
-                    last_dists = 1. * dist_sorted[step_old:step]
-
                     idxs_survived += list(msk)
-            if d_avrg > ld_avrg + 5 * ld_std:
+
+                    # Break condition 1
+                    d_avrg = np.median(d_sorted[step_old:step])
+                    # d_std = np.std(dist_sorted[step_old:step])
+                    ld_avrg = np.median(last_dists)
+                    ld_std = np.std(last_dists)
+                    last_dists = 1. * d_sorted[step_old:step]
+
+                    # Reset break condition 2
+                    N_break_count = 0
+                else:
+                    # Break condition 2
+                    N_break_count += 1
+
+            if N_break_count == self.N_break:
                 break
+            if d_avrg > ld_avrg + self.N_std_d * ld_std:
+                break
+
             step_old = step
 
         return idxs_survived
@@ -346,13 +521,17 @@ class fastMP:
 
         return C_s
 
-    def assignProbs(self, msk_accpt, idx_selected):
+    def assignProbs(self, msk_accpt, idx_selected, nruns):
         """
         """
         N_stars = msk_accpt.sum()
         # Assign probabilities as averages of counts
         values, counts = np.unique(idx_selected, return_counts=True)
-        probs = counts / self.N_resample
+
+        N_tot = (self.N_resample + 1) * (self.N_membs_max - self.N_membs_min)
+        # N_tot = nruns
+
+        probs = counts / N_tot
         probs_all = np.zeros(N_stars)
         probs_all[values] = probs
 
