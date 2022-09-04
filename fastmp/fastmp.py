@@ -36,6 +36,22 @@ class fastMP:
             lon, lat, pmRA, pmDE, plx, mag, col = X
             e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
+        # Estimate VPD center
+        vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
+        # Estimate Plx center
+        xy_c, plx_c = self.centXYPlx(lon, lat, pmRA, pmDE, plx, vpd_c)
+        print(xy_c, vpd_c, plx_c)
+
+        dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
+        dist_plx = abs(plx_c - plx)
+        msk = (dist_pm < 1.5) & (dist_plx < .5)
+        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk]
+        i1 = np.arange(0, len(msk_accpt))
+        i2 = i1[msk_accpt]
+        i3 = i2[msk]
+        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
+        msk_accpt[i3] = True
+
         # Prepare Ripley's K data
         rads, Kest, C_thresh_N = self.rkparams(lon, lat)
 
@@ -43,19 +59,11 @@ class fastMP:
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
-        # Estimate VPD center
-        vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
-        # Estimate Plx center
-        xy_c, plx_c = self.centXYPlx(lon, lat, pmRA, pmDE, plx, vpd_c)
-        print(xy_c, vpd_c, plx_c)
-
-        # cents_old = [[xy_c[0], xy_c[1], vpd_c[0], vpd_c[1], plx_c]]
-        # cent_old = cents_old[0]
         nruns = 0
 
         lon_lat = np.array([lon, lat]).T
 
-        idx_selected = []
+        idx_selected, N_membs = [], []
         for _ in range(self.N_resample + 1):
             # Sample data
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
@@ -72,6 +80,8 @@ class fastMP:
                     d_pm_plx_sorted, N_clust)
 
                 # st_idx = list(d_idxs)[:len(st_idx)]
+
+                N_membs.append(len(st_idx))
 
                 if st_idx:
                     # N = len(st_idx)
@@ -102,19 +112,12 @@ class fastMP:
                         lon[st_idx], lat[st_idx], s_pmRA[st_idx],
                         s_pmDE[st_idx], s_Plx[st_idx], vpd_c)
 
-                    # cents_old += [[xy_c[0], xy_c[1], vpd_c[0], vpd_c[1], plx_c]]
-                    # cents = np.median(cents_old, 0)
-                    # xy_c = cents[:2]
-                    # vpd_c = cents[2:4]
-                    # plx_c = cents[-1]
-                    # if np.allclose(cent_old, cents, rtol=1e-04) and _ > 10:
-                    #     break
-                    # cent_old = cents
-
                     print(_, xy_c, vpd_c, plx_c)
 
                     idx_selected += st_idx
                 nruns += 1
+
+        print(np.mean(N_membs), np.std(N_membs))
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, nruns)
 
@@ -263,10 +266,10 @@ class fastMP:
         # xy_c += [ex[np.argmax(H) + 1]]
 
         #
-        H, edge = np.histogramdd([lon[idx], lat[idx], Plx[idx]], 10)
-        idxs = np.unravel_index(H.argmax(), H.shape)
-        xy_c = [edge[0][idxs[0]], edge[1][idxs[1]]]
-        plx_c = edge[2][idxs[2]]
+        # H, edge = np.histogramdd([lon[idx], lat[idx], Plx[idx]], 10)
+        # idxs = np.unravel_index(H.argmax(), H.shape)
+        # xy_c = [edge[0][idxs[0]], edge[1][idxs[1]]]
+        # plx_c = edge[2][idxs[2]]
 
         from scipy import stats
         x, y, z = lon[idx], lat[idx], Plx[idx]
@@ -315,110 +318,6 @@ class fastMP:
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
         return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
-
-        # lon, lat = lon_lat.T
-        # def func(i0, i1):
-        #     plt.subplot(221)
-        #     plt.scatter(lon, lat, s=1, c='grey')
-        #     plt.scatter(lon[d_idxs][i0:i1], lat[d_idxs][i0:i1], alpha=.5)
-        #     # plt.xlim(lon.min(), lon.max())
-        #     # plt.ylim(lat.min(), lat.max())
-        #     plt.subplot(222)
-        #     plt.scatter(s_pmRA, s_pmDE, s=1, c='grey')
-        #     plt.scatter(s_pmRA[d_idxs][i0:i1], s_pmDE[d_idxs][i0:i1], alpha=.5)
-        #     plt.subplot(223)
-        #     plt.hist(s_Plx[s_Plx < 10], color='grey', alpha=.5, density=True)
-        #     plt.hist(s_Plx[d_idxs][i0:i1], color='blue', alpha=.5, density=True)
-        #     plt.subplot(224)
-        #     plt.scatter(col, mag, s=1, c='grey')
-        #     plt.scatter(col[d_idxs][i0:i1], mag[d_idxs][i0:i1])
-        #     plt.gca().invert_yaxis()
-        #     plt.show()
-
-        # # func(0, 100)
-        # # breakpoint()
-
-        # # return d_idxs, dist_sorted
-
-        # dist_xy_s, dist_pm_s, dist_plx_s = dist_xy[d_idxs],\
-        #     dist_pm[d_idxs], dist_plx[d_idxs]
-
-        # Nd = len(s_Plx)
-
-        # Nstep = 25
-
-        # # # Maximum values
-        # # d1_max = np.median(dist_xy_s[0:Nstep])
-        # # d2_max = np.median(dist_pm_s[0:Nstep])
-        # # d3_max = np.median(dist_plx_s[0:Nstep])
-
-        # # dists_med = []
-        # # step_old = 0
-        # # istep = min(np.percentile(Nd, 10), 1000) # HARDCODED '10', 1000'
-        # # for step in np.arange(Nd - istep, Nd, Nstep):
-        # #     d1 = np.median(dist_xy_s[step_old:step_old + step])
-        # #     d2 = np.median(dist_pm_s[step_old:step_old + step])
-        # #     d3 = np.median(dist_plx_s[step_old:step_old + step])
-        # #     dists_med.append([d1, d2, d3])
-        # #     step_old = step
-        # # dists_med = np.array(dists_med).T
-        # # vals = (d1_max / dists_med[0] + d2_max / dists_med[1] + d3_max / dists_med[2])
-        # # floor = np.median(vals / 3.)
-
-        # dists_med = []
-        # step_old = 0
-        # for step in np.arange(Nstep, 2000, Nstep):
-        #     d1 = np.median(dist_xy_s[:step])
-        #     d1_std = np.std(dist_xy_s[:step])
-        #     d2 = np.median(dist_pm_s[:step])
-        #     d2_std = np.std(dist_pm_s[:step])
-        #     d3 = np.median(dist_plx_s[:step])
-        #     d3_std = np.std(dist_plx_s[:step])
-
-        #     c1 = (((dist_xy_s[step:step + Nstep] - d1) / d1_std) > .5).sum()
-        #     c2 = (((dist_pm_s[step:step + Nstep] - d2) / d2_std) > .5).sum()
-        #     c3 = (((dist_plx_s[step:step + Nstep] - d3) / d3_std) > .5).sum()
-
-        #     print(step_old, step, step + Nstep, c1, c2, c3, c1+c2+c3)
-
-        #     i0, i1, i2 = step_old, step, step + Nstep
-        #     plt.subplot(221)
-        #     plt.scatter(lon, lat, s=1, c='grey')
-        #     plt.scatter(lon[d_idxs][i0:i1], lat[d_idxs][i0:i1], alpha=.5)
-        #     plt.scatter(lon[d_idxs][i1:i2], lat[d_idxs][i1:i2], alpha=.5, c='r')
-        #     plt.subplot(222)
-        #     plt.scatter(s_pmRA, s_pmDE, s=1, c='grey')
-        #     plt.scatter(s_pmRA[d_idxs][i0:i1], s_pmDE[d_idxs][i0:i1], alpha=.5)
-        #     plt.scatter(s_pmRA[d_idxs][i1:i2], s_pmDE[d_idxs][i1:i2], alpha=.5, c='r')
-        #     plt.subplot(223)
-        #     plt.hist(s_Plx[s_Plx < 10], color='grey', alpha=.5, density=True)
-        #     plt.hist(s_Plx[d_idxs][i0:i1], color='blue', alpha=.5, density=True)
-        #     plt.hist(s_Plx[d_idxs][i1:i2], color='r', alpha=.5, density=True)
-        #     plt.subplot(224)
-        #     plt.scatter(col, mag, s=1, c='grey')
-        #     plt.scatter(col[d_idxs][i0:i1], mag[d_idxs][i0:i1], alpha=.5)
-        #     plt.scatter(col[d_idxs][i1:i2], mag[d_idxs][i1:i2], alpha=.5, c='r')
-        #     plt.gca().invert_yaxis()
-        #     plt.show()
-
-        #     # val = (d1_max / d1 + d2_max / d2 + d3_max / d3) / 3.
-        #     # dists_med.append([d1, d2, d3])
-
-        #     step_old = step
-        # breakpoint()
-
-        # dists_med = np.array(dists_med).T
-        # vals = (d1_max / dists_med[0] + d2_max / dists_med[1] + d3_max / dists_med[2]) / 3
-        # plt.plot(vals)
-        # plt.show()
-
-        # breakpoint()
-
-        # Indexes of the elements in the input arrays ordered by the smallest
-        # sum of indexes
-        # final_idxs = idx_sum.argsort().argsort()
-
-        # return final_idxs[:step]
 
     def getStars(self, rads, Kest, C_thresh_N, lon, lat, d_idxs, d_sorted, N_clust):
         """
