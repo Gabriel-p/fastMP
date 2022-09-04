@@ -71,7 +71,7 @@ class fastMP:
                     rads, Kest, C_thresh_N, lon, lat, d_pm_plx_idxs,
                     d_pm_plx_sorted, N_clust)
 
-                st_idx = list(d_idxs)[:len(st_idx)]
+                # st_idx = list(d_idxs)[:len(st_idx)]
 
                 if st_idx:
                     # N = len(st_idx)
