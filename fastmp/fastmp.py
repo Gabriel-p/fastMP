@@ -12,12 +12,16 @@ class fastMP:
     def __init__(self,
                  N_membs_min=25,
                  N_membs_max=50,
+                 maxPMrad=1.5,
+                 maxPlxrad=.5,
                  N_resample=0,
                  N_std_d=5,
                  N_break=50,
                  vpd_c=None):
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
+        self.maxPMrad = maxPMrad,
+        self.maxPlxrad = maxPlxrad,
         self.N_resample = N_resample
         self.N_std_d = N_std_d
         self.N_break = N_break
@@ -26,8 +30,8 @@ class fastMP:
     def fit(self, X):
         """
         """
-        # Remove outliers and nans
-        msk_accpt, X = self.outlRjct(X)
+        # Remove nans
+        msk_accpt, X = self.nanRjct(X)
 
         # Unpack input data
         if self.N_resample > 0:
@@ -42,15 +46,9 @@ class fastMP:
         xy_c, plx_c = self.centXYPlx(lon, lat, pmRA, pmDE, plx, vpd_c)
         print(xy_c, vpd_c, plx_c)
 
-        dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
-        dist_plx = abs(plx_c - plx)
-        msk = (dist_pm < 1.5) & (dist_plx < .5)
-        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk]
-        i1 = np.arange(0, len(msk_accpt))
-        i2 = i1[msk_accpt]
-        i3 = i2[msk]
-        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
-        msk_accpt[i3] = True
+        # Remove obvious field stars
+        msk_accpt, lon, lat, pmRA, pmDE, plx = self.remField(
+            msk_accpt, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
 
         # Prepare Ripley's K data
         rads, Kest, C_thresh_N = self.rkparams(lon, lat)
@@ -123,9 +121,9 @@ class fastMP:
 
         return probs_final
 
-    def outlRjct(self, data):
+    def nanRjct(self, data):
         """
-        Remove outliers and nans
+        Remove nans
         """
         msk_all = []
         # Process each dimension separately
@@ -136,36 +134,6 @@ class fastMP:
         msk_accpt = np.logical_and.reduce(msk_all)
 
         return msk_accpt, data.T[msk_accpt].T
-
-    def rkparams(self, lon, lat):
-        """
-        https://rdrr.io/cran/spatstat/man/Kest.html
-        "For a rectangular window it is prudent to restrict the r values to a
-        maximum of 1/4 of the smaller side length of the rectangle
-        (Ripley, 1977, 1988; Diggle, 1983)"
-
-        """
-        xmin, xmax = lon.min(), lon.max()
-        ymin, ymax = lat.min(), lat.max()
-        area = (xmax - xmin) * (ymax - ymin)
-        Kest = RipleysKEstimator(
-            area=area, x_max=xmax, y_max=ymax, x_min=xmin, y_min=ymin)
-        lmin = min((xmax - xmin), (ymax - ymin))
-        rads = np.linspace(lmin * 0.01, lmin * .25, 10)
-
-        area = (xmax - xmin) * (ymax - ymin)
-        C_thresh_N = 1.68 * np.sqrt(area)
-
-        return rads, Kest, C_thresh_N
-
-    def dataSample(self, data_3, data_err):
-        """
-        Gaussian random sample
-        """
-        if self.N_resample == 0:
-            return data_3
-        grs = np.random.normal(0., 1., data_3.shape[1])
-        return data_3 + grs * data_err
 
     def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
         """
@@ -288,6 +256,54 @@ class fastMP:
         # breakpoint()
 
         return xy_c, plx_c
+
+    def remField(self, msk_accpt, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
+        """
+        Remove obvious field stars
+        """
+        dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
+        dist_plx = abs(plx_c - plx)
+        msk = (dist_pm < self.maxPMrad) & (dist_plx < self.maxPlxrad)
+        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
+            plx[msk]
+
+        i1 = np.arange(0, len(msk_accpt))
+        i2 = i1[msk_accpt]
+        i3 = i2[msk]
+        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
+        msk_accpt[i3] = True
+
+        return msk_accpt, lon, lat, pmRA, pmDE, plx
+
+    def rkparams(self, lon, lat):
+        """
+        https://rdrr.io/cran/spatstat/man/Kest.html
+        "For a rectangular window it is prudent to restrict the r values to a
+        maximum of 1/4 of the smaller side length of the rectangle
+        (Ripley, 1977, 1988; Diggle, 1983)"
+
+        """
+        xmin, xmax = lon.min(), lon.max()
+        ymin, ymax = lat.min(), lat.max()
+        area = (xmax - xmin) * (ymax - ymin)
+        Kest = RipleysKEstimator(
+            area=area, x_max=xmax, y_max=ymax, x_min=xmin, y_min=ymin)
+        lmin = min((xmax - xmin), (ymax - ymin))
+        rads = np.linspace(lmin * 0.01, lmin * .25, 10)
+
+        area = (xmax - xmin) * (ymax - ymin)
+        C_thresh_N = 1.68 * np.sqrt(area)
+
+        return rads, Kest, C_thresh_N
+
+    def dataSample(self, data_3, data_err):
+        """
+        Gaussian random sample
+        """
+        if self.N_resample == 0:
+            return data_3
+        grs = np.random.normal(0., 1., data_3.shape[1])
+        return data_3 + grs * data_err
 
     def getDists(
             self, lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c, mag,
