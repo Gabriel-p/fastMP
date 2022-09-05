@@ -77,7 +77,14 @@ class fastMP:
                     rads, Kest, C_thresh_N, lon, lat, d_pm_plx_idxs,
                     d_pm_plx_sorted, N_clust)
 
-                # st_idx = list(d_idxs)[:len(st_idx)]
+                dist_pm = cdist(np.array(
+                    [s_pmRA[st_idx], s_pmDE[st_idx]]).T,
+                    np.array([vpd_c])).T[0]
+                dist_plx = abs(plx_c - s_Plx[st_idx])
+                msk = (dist_pm < self.maxPMrad) & (dist_plx < self.maxPlxrad)
+                st_idx = np.array(st_idx)[msk]
+
+                st_idx = list(d_idxs)[:len(st_idx)]
 
                 N_membs.append(len(st_idx))
 
@@ -110,7 +117,7 @@ class fastMP:
                         lon[st_idx], lat[st_idx], s_pmRA[st_idx],
                         s_pmDE[st_idx], s_Plx[st_idx], vpd_c)
 
-                    print(_, xy_c, vpd_c, plx_c)
+                    print(xy_c, vpd_c, plx_c)
 
                     idx_selected += st_idx
                 nruns += 1
