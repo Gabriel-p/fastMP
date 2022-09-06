@@ -18,7 +18,7 @@ class fastMP:
                  N_resample=0,
                  N_std_d=5,
                  N_break=50,
-                 pmsplxSTDDEV=2,
+                 pmsplxSTDDEV=5,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -82,11 +82,15 @@ class fastMP:
                 if not st_idx:
                     continue
 
-                # plt.subplot(131)
-                # plt.hist(s_pmRA[st_idx], alpha=.5, color='r')
-                # plt.subplot(132)
-                # plt.hist(s_pmDE[st_idx], alpha=.5, color='r')
-                # plt.subplot(133)
+                # plt.subplot(221)
+                # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='r')
+                # plt.subplot(222)
+                # # plt.hist(s_pmRA[st_idx], alpha=.5, color='r')
+                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], alpha=.5, color='r')
+                # plt.subplot(223)
+                # # plt.hist(s_pmDE[st_idx], alpha=.5, color='r')
+                # plt.scatter(s_pmRA[st_idx], s_Plx[st_idx], alpha=.5, color='r')
+                # plt.subplot(224)
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='r')
 
                 # Remove filtered stars
@@ -100,11 +104,15 @@ class fastMP:
                 if not st_idx:
                     continue
 
-                # plt.subplot(131)
-                # plt.hist(s_pmRA[st_idx], alpha=.5, color='b')
-                # plt.subplot(132)
-                # plt.hist(s_pmDE[st_idx], alpha=.5, color='b')
-                # plt.subplot(133)
+                # plt.subplot(221)
+                # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='b')
+                # plt.subplot(222)
+                # # plt.hist(s_pmRA[st_idx], alpha=.5, color='b')
+                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], alpha=.5, color='b')
+                # plt.subplot(223)
+                # # plt.hist(s_pmDE[st_idx], alpha=.5, color='b')
+                # plt.scatter(s_pmRA[st_idx], s_Plx[st_idx], alpha=.5, color='b')
+                # plt.subplot(224)
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='b')
                 # plt.show()
 
