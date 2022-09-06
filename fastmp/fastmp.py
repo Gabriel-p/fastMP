@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
+from scipy.stats import gaussian_kde
 
 import matplotlib.pyplot as plt
 
@@ -12,19 +13,27 @@ class fastMP:
     def __init__(self,
                  N_membs_min=25,
                  N_membs_max=50,
-                 maxPMrad='auto',
-                 maxPlxrad='auto',
+                 # maxPMrad='auto',
+                 # maxPlxrad='auto',
                  N_resample=0,
                  N_std_d=5,
                  N_break=50,
+                 pmsplxSTDDEV=2,
+                 N_bins=50,
+                 zoom_f=4,
+                 N_zoom=10,
                  vpd_c=None):
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
-        self.maxPMrad = maxPMrad
-        self.maxPlxrad = maxPlxrad
+        # self.maxPMrad = maxPMrad
+        # self.maxPlxrad = maxPlxrad
         self.N_resample = N_resample
         self.N_std_d = N_std_d
         self.N_break = N_break
+        self.pmsplxSTDDEV = pmsplxSTDDEV
+        self.N_bins = N_bins
+        self.zoom_f = zoom_f
+        self.N_zoom = N_zoom
         self.vpd_c = vpd_c
 
     def fit(self, X):
@@ -40,10 +49,8 @@ class fastMP:
             lon, lat, pmRA, pmDE, plx = X
             e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
-        # Estimate VPD center
-        vpd_c = self.centVPD(np.array([pmRA, pmDE]).T)
-        # Estimate Plx center
-        xy_c, plx_c = self.centXYPlx(lon, lat, pmRA, pmDE, plx, vpd_c)
+        # Estimate center
+        xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
         print(xy_c, vpd_c, plx_c)
 
         # Remove obvious field stars
@@ -53,49 +60,66 @@ class fastMP:
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
 
-        # Pack PMs+Plx data
+        # Pack data
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
-
         lon_lat = np.array([lon, lat]).T
 
-        idx_selected, N_membs = [], []
+        N_runs, idx_selected, N_membs = 0, [], []
         for _ in range(self.N_resample + 1):
             # Sample data (if requested)
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
             for N_clust in range(self.N_membs_min, self.N_membs_max):
 
-                # Obtain indexes and distances of stars to the VPD+Plx center
+                # Obtain indexes and distances of stars to the center
                 d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
                     lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
 
                 # Most probable members given their indexed distances
                 st_idx = self.getStars(
                     lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+                if not st_idx:
+                    continue
+
+                # plt.subplot(131)
+                # plt.hist(s_pmRA[st_idx], alpha=.5, color='r')
+                # plt.subplot(132)
+                # plt.hist(s_pmDE[st_idx], alpha=.5, color='r')
+                # plt.subplot(133)
+                # plt.hist(s_Plx[st_idx], alpha=.5, color='r')
 
                 # Remove filtered stars
-                msk = self.PMPlxFilter(s_pmRA[st_idx], s_pmDE[st_idx],
-                                       s_Plx[st_idx], vpd_c, plx_c)
-                st_idx = np.array(st_idx)[msk]
+                msk = self.PMPlxFilterSTDDEV(
+                    s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                    plx_c)
+                st_idx = list(np.array(st_idx)[msk])
 
                 # Store from 'd_idxs' a number of stars given by 'st_idx'
                 st_idx = list(d_idxs)[:len(st_idx)]
+                if not st_idx:
+                    continue
+
+                # plt.subplot(131)
+                # plt.hist(s_pmRA[st_idx], alpha=.5, color='b')
+                # plt.subplot(132)
+                # plt.hist(s_pmDE[st_idx], alpha=.5, color='b')
+                # plt.subplot(133)
+                # plt.hist(s_Plx[st_idx], alpha=.5, color='b')
+                # plt.show()
 
                 # Re-estimate centers using the selected stars
-                if st_idx:
-                    vpd_c = self.centVPD(np.array([
-                        s_pmRA[st_idx], s_pmDE[st_idx]]).T)
-                    xy_c, plx_c = self.centXYPlx(
-                        lon[st_idx], lat[st_idx], s_pmRA[st_idx],
-                        s_pmDE[st_idx], s_Plx[st_idx], vpd_c)
+                xy_c, vpd_c, plx_c = self.centXYPMPlx(
+                    lon[st_idx], lat[st_idx], s_pmRA[st_idx],
+                    s_pmDE[st_idx], s_Plx[st_idx])
 
-                    idx_selected += st_idx
-                    N_membs.append(len(st_idx))
+                idx_selected += st_idx
+                N_runs += 1
+                N_membs.append(len(st_idx))
 
         print(np.mean(N_membs), np.std(N_membs))
 
-        probs_final = self.assignProbs(msk_accpt, idx_selected)
+        probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
         return probs_final
 
@@ -113,28 +137,22 @@ class fastMP:
 
         return msk_accpt, data.T[msk_accpt].T
 
-    def centVPD(self, vpd, N_bins=50, zoom_f=4, N_zoom=10):
+    def centXYPMPlx(self, lon, lat, pmRA, pmDE, Plx):
         """
-        Estimate the center of the cluster in the proper motions space.
+        Estimate the center of the cluster.
 
         This is the most important function in the algorithm If this function
         fails, everything else will fail too.
 
-        Parameters
-        ----------
-        vpd : TYPE
-            Description
-        N_dim : int, optional
-            Description
+        M: multiplier factor that determines how many N_membs are used to
+        estimate the parallax center.
 
-        Returns
-        -------
-        TYPE
-            Description
         """
         vpd_mc = self.vpd_c
 
-        for _ in range(N_zoom):
+        vpd = np.array([pmRA, pmDE]).T
+        # Center in PMs space
+        for _ in range(self.N_zoom):
             x, y = vpd.T
             N_stars = len(x)
 
@@ -142,7 +160,7 @@ class fastMP:
                 break
 
             # Find center coordinates as max density
-            H, edgx, edgy = np.histogram2d(x, y, bins=N_bins)
+            H, edgx, edgy = np.histogram2d(x, y, bins=self.N_bins)
             flat_idx = H.argmax()
             cbx, cby = np.unravel_index(flat_idx, H.shape)
             cx = (edgx[cbx + 1] + edgx[cbx]) / 2.
@@ -157,83 +175,30 @@ class fastMP:
 
             # Zoom in
             rx, ry = edgx[1] - edgx[0], edgy[1] - edgy[0]
-            msk = (x < (cx + zoom_f * rx))\
-                & (x > (cx - zoom_f * rx))\
-                & (y < (cy + zoom_f * ry))\
-                & (y > (cy - zoom_f * ry))
+            msk = (x < (cx + self.zoom_f * rx))\
+                & (x > (cx - self.zoom_f * rx))\
+                & (y < (cy + self.zoom_f * ry))\
+                & (y > (cy - self.zoom_f * ry))
             vpd = vpd[msk]
 
         if vpd_mc is not None:
             cx, cy = cxm, cym
+        vpd_c = (cx, cy)
 
-        return (cx, cy)
-
-    def centXYPlx(self, lon, lat, pmRA, pmDE, Plx, vpd_c, M=4):
-        """
-        Estimate the center of the cluster in parallax.
-
-        M: multiplier factor that determines how many N_membs are used to
-        estimate the parallax center.
-
-        Parameters
-        ----------
-        pmRA : TYPE
-            Description
-        pmDE : TYPE
-            Description
-        Plx : TYPE
-            Description
-        vpd_c : TYPE
-            Description
-        M : int, optional
-            Description
-
-        Returns
-        -------
-        TYPE
-            Description
-        """
         # Distance to VPD center
         dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
-        # Closest stars to center
-        idx = dist.argsort()[: M * self.N_membs_min]  # M IS HARDCODED
+        # Closest stars to PMs center
+        idx = dist.argsort()[:4 * self.N_membs_min] # HARDCODED
 
-        # Center in Plx
-        # plx_c = np.median(Plx[idx])
-
-        # # Center estimated as the  mode
-        # H, ex = np.histogram(Plx[idx])
-        # plx_c = ex[np.argmax(H) + 1]
-        # # Center X
-        # H, ex = np.histogram(lon[idx])
-        # xy_c = [ex[np.argmax(H) + 1]]
-        # # Center Y
-        # H, ex = np.histogram(lat[idx])
-        # xy_c += [ex[np.argmax(H) + 1]]
-
-        #
-        # H, edge = np.histogramdd([lon[idx], lat[idx], Plx[idx]], 10)
-        # idxs = np.unravel_index(H.argmax(), H.shape)
-        # xy_c = [edge[0][idxs[0]], edge[1][idxs[1]]]
-        # plx_c = edge[2][idxs[2]]
-
-        from scipy import stats
+        # XY and Plx centers
         x, y, z = lon[idx], lat[idx], Plx[idx]
         xyz = np.vstack([x, y, z])
-        kde = stats.gaussian_kde(xyz)
+        kde = gaussian_kde(xyz)
         density = kde(xyz)
         c1, c2, plx_c = xyz[:, density.argmax()]
         xy_c = [c1, c2]
 
-        # # Evaluate kde on a grid
-        # xmin, ymin, zmin = x.min(), y.min(), z.min()
-        # xmax, ymax, zmax = x.max(), y.max(), z.max()
-        # xi, yi, zi = np.mgrid[xmin:xmax:10j, ymin:ymax:10j, zmin:zmax:10j]
-        # coords = np.vstack([item.ravel() for item in [xi, yi, zi]]) 
-        # density2 = kde(coords).reshape(xi.shape)
-        # breakpoint()
-
-        return xy_c, plx_c
+        return xy_c, vpd_c, plx_c
 
     def remField(self, msk_accpt, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
         """
@@ -253,31 +218,69 @@ class fastMP:
 
     def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
+        Identify obvious field stars
         """
         dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - plx)
 
-        if self.maxPMrad == 'auto':
-            if abs(vpd_c[0]) > 6:
-                pmRad = .5 * abs(vpd_c[0])
-            elif abs(vpd_c[0]) > 2:
-                pmRad = 3
-            else:
-                pmRad = 1.5
-        else:
-            pmRad = float(self.maxPMrad)
+        # if self.maxPMrad == 'auto':
+        #     if abs(vpd_c[0]) > 6:
+        #         pmRad = .5 * abs(vpd_c[0])
+        #     elif abs(vpd_c[0]) > 2:
+        #         pmRad = 3
+        #     else:
+        #         pmRad = 1.5
+        # else:
+        #     pmRad = float(self.maxPMrad)
 
-        if self.maxPlxrad == 'auto':
-            if plx_c < 2:
-                plxRad = 0.5
-            elif plx_c < 10:
-                plxRad = 1
-            else:
-                plxRad = .5 * plx_c
-        else:
-            plxRad = float(self.plxRad)
+        # if self.maxPlxrad == 'auto':
+        #     if plx_c < 2:
+        #         plxRad = 0.5
+        #     elif plx_c < 10:
+        #         plxRad = 1
+        #     else:
+        #         plxRad = .5 * plx_c
+        # else:
+        #     plxRad = float(self.plxRad)
+
+        pmRad = max(3, .5 * abs(vpd_c[0]))
+        plxRad = max(.5, .5 * plx_c)
 
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
+        return msk
+
+    def PMPlxFilterSTDDEV(self, pmRA, pmDE, plx, vpd_c, plx_c):
+        """
+        Identify obvious field stars
+        """
+        pms = np.array([pmRA, pmDE]).T
+        dist_pm = cdist(pms, np.array([vpd_c])).T[0]
+        dist_plx = abs(plx_c - plx)
+
+        # dist_pm = cdist(pms, np.median(pms, 0).reshape(1, 2)).T[0]
+        # dist_plx = abs(np.median(plx) - plx)
+
+        #
+        pmRad = self.pmsplxSTDDEV * np.std(pms, 0).mean()
+        plxRad = self.pmsplxSTDDEV * np.std(plx)
+
+        #
+        msk = (dist_pm < pmRad) & (dist_plx < plxRad)
+
+        # print(pmRad, (dist_pm < pmRad).sum(), plxRad, (dist_plx < plxRad).sum(), len(pmRA), msk.sum())
+        # plt.subplot(131)
+        # # plt.scatter(pmRA, pmDE, alpha=.5)
+        # plt.hist(pmRA, alpha=.5, color='r')
+        # plt.hist(pmRA[msk], alpha=.5, color='b')
+        # plt.subplot(132)
+        # plt.hist(pmDE, alpha=.5, color='r')
+        # plt.hist(pmDE[msk], alpha=.5, color='b')
+        # plt.subplot(133)
+        # plt.hist(plx, alpha=.5, color='r')
+        # plt.hist(plx[msk], alpha=.5, color='b')
+        # plt.show()
+        # breakpoint()
+
         return msk
 
     def rkparams(self, lon, lat):
@@ -286,7 +289,6 @@ class fastMP:
         "For a rectangular window it is prudent to restrict the r values to a
         maximum of 1/4 of the smaller side length of the rectangle
         (Ripley, 1977, 1988; Diggle, 1983)"
-
         """
         xmin, xmax = lon.min(), lon.max()
         ymin, ymax = lat.min(), lat.max()
@@ -294,10 +296,10 @@ class fastMP:
         Kest = RipleysKEstimator(
             area=area, x_max=xmax, y_max=ymax, x_min=xmin, y_min=ymin)
         lmin = min((xmax - xmin), (ymax - ymin))
-        rads = np.linspace(lmin * 0.01, lmin * .25, 10)
+        rads = np.linspace(lmin * 0.01, lmin * .25, 10)  # HARDCODED
 
         area = (xmax - xmin) * (ymax - ymin)
-        C_thresh_N = 1.68 * np.sqrt(area)
+        C_thresh_N = 1.68 * np.sqrt(area)  # HARDCODED
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
@@ -440,16 +442,14 @@ class fastMP:
 
         return C_s
 
-    def assignProbs(self, msk_accpt, idx_selected):
+    def assignProbs(self, msk_accpt, idx_selected, N_runs):
         """
         """
         N_stars = msk_accpt.sum()
         # Assign probabilities as averages of counts
         values, counts = np.unique(idx_selected, return_counts=True)
 
-        N_tot = (self.N_resample + 1) * (self.N_membs_max - self.N_membs_min)
-
-        probs = counts / N_tot
+        probs = counts / N_runs
         probs_all = np.zeros(N_stars)
         probs_all[values] = probs
 
