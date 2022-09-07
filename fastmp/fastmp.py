@@ -73,12 +73,13 @@ class fastMP:
             for N_clust in range(self.N_membs_min, self.N_membs_max):
 
                 # Obtain indexes and distances of stars to the center
-                d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
+                # d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+                d_idxs, d_sorted = self.getDists(
                     lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
 
                 # Most probable members given their indexed distances
                 st_idx = self.getStars(
-                    lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+                    lon, lat, d_idxs, d_sorted, N_clust)
                 if not st_idx:
                     continue
 
@@ -93,16 +94,16 @@ class fastMP:
                 # plt.subplot(224)
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='r')
 
-                # Remove filtered stars
-                msk = self.PMPlxFilterSTDDEV(
-                    s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                    plx_c)
-                st_idx = list(np.array(st_idx)[msk])
+                # # Remove filtered stars
+                # msk = self.PMPlxFilterSTDDEV(
+                #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                #     plx_c)
+                # st_idx = list(np.array(st_idx)[msk])
 
-                # Store from 'd_idxs' a number of stars given by 'st_idx'
-                st_idx = list(d_idxs)[:len(st_idx)]
-                if not st_idx:
-                    continue
+                # # Store from 'd_idxs' a number of stars given by 'st_idx'
+                # st_idx = list(d_idxs)[:len(st_idx)]
+                # if not st_idx:
+                #     continue
 
                 # plt.subplot(221)
                 # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='b')
@@ -326,28 +327,48 @@ class fastMP:
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
-        dist_xy = cdist(lon_lat, np.array([xy_c])).T[0]
-        dist_pm = cdist(np.array([s_pmRA, s_pmDE]).T, np.array([vpd_c])).T[0]
+        # dist_xy = cdist(lon_lat, np.array([xy_c])).T[0]
+        # dist_pm = cdist(np.array([s_pmRA, s_pmDE]).T, np.array([vpd_c])).T[0]
+        # dist_plx = abs(plx_c - s_Plx)
+
+        # # The first argsort() returns the indexes ordered by smallest distance,
+        # # the second argsort() returns those indexes ordered from min to max.
+        # # The resulting arrays contain the position for each element in the
+        # # input arrays according to their minimum distances in each dimension
+        # dxy_idxs = dist_xy.argsort().argsort()
+        # dpm_idxs = dist_pm.argsort().argsort()
+        # dplx_idxs = dist_plx.argsort().argsort()
+        # # Sum the positions for each element for all the dimensions
+        # idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        # # Sort
+        # d_idxs = idx_sum.argsort()
+
+        # # Sort distances using only PMs+Plx
+        # dist_sum = dist_pm + dist_plx
+        # d_pm_plx_idxs = dist_sum.argsort()
+        # d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
+
+        # return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+
+        # lon, lat = lon_lat.T
+        # dist_x = abs(lon - xy_c[0])
+        # dist_y = abs(lat - xy_c[1])
+        dist_pmra = abs(s_pmRA - vpd_c[0])
+        dist_pmde = abs(s_pmDE - vpd_c[1])
         dist_plx = abs(plx_c - s_Plx)
 
-        # The first argsort() returns the indexes ordered by smallest distance,
-        # the second argsort() returns those indexes ordered from min to max.
-        # The resulting arrays contain the position for each element in the
-        # input arrays according to their minimum distances in each dimension
-        dxy_idxs = dist_xy.argsort().argsort()
-        dpm_idxs = dist_pm.argsort().argsort()
+        # dx_idxs = dist_x.argsort().argsort()
+        # dy_idxs = dist_y.argsort().argsort()
+        dpmra_idxs = dist_pmra.argsort().argsort()
+        dpmde_idxs = dist_pmde.argsort().argsort()
         dplx_idxs = dist_plx.argsort().argsort()
-        # Sum the positions for each element for all the dimensions
-        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
-        # Sort
+
+        # idx_sum = dx_idxs + dy_idxs + dpmra_idxs + dpmde_idxs + dplx_idxs
+        idx_sum = dpmra_idxs + dpmde_idxs + dplx_idxs
         d_idxs = idx_sum.argsort()
+        d_sorted = idx_sum[d_idxs]
 
-        # Sort distances using only PMs+Plx
-        dist_sum = dist_pm + dist_plx
-        d_pm_plx_idxs = dist_sum.argsort()
-        d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
-
-        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+        return d_idxs, d_sorted
 
     def getStars(self, lon, lat, d_idxs, d_sorted, N_clust):
         """
