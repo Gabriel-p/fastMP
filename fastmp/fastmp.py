@@ -18,7 +18,7 @@ class fastMP:
                  N_resample=0,
                  N_std_d=5,
                  N_break=20,
-                 pmsplxSTDDEV=3,
+                 pmsplxSTDDEV=5,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -98,7 +98,7 @@ class fastMP:
                 if not st_idx:
                     continue
 
-                # Remove filtered stars
+                # Filter field stars
                 msk = self.PMPlxFilterSTDDEV(
                     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
                     plx_c)
@@ -231,28 +231,13 @@ class fastMP:
         dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - plx)
 
-        # if self.maxPMrad == 'auto':
-        #     if abs(vpd_c[0]) > 6:
-        #         pmRad = .5 * abs(vpd_c[0])
-        #     elif abs(vpd_c[0]) > 2:
-        #         pmRad = 3
-        #     else:
-        #         pmRad = 1.5
-        # else:
-        #     pmRad = float(self.maxPMrad)
-
-        # if self.maxPlxrad == 'auto':
-        #     if plx_c < 2:
-        #         plxRad = 0.5
-        #     elif plx_c < 10:
-        #         plxRad = 1
-        #     else:
-        #         plxRad = .5 * plx_c
-        # else:
-        #     plxRad = float(self.plxRad)
-
         pmRad = max(3, .5 * abs(vpd_c[0]))
-        plxRad = max(.5, .5 * plx_c)
+        # plxRad = max(.5, .5 * plx_c)
+
+        d_pc = 1000 / plx_c
+        plx_1, plx_2 = 1000 / (d_pc + 250), max(.05, 1000 / (d_pc - 250))
+        plx_r = max(plx_c - plx_1, plx_2 - plx_c)
+        plxRad = max(.2, plx_r)
 
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
 
@@ -265,9 +250,6 @@ class fastMP:
         pms = np.array([pmRA, pmDE]).T
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - plx)
-
-        # dist_pm = cdist(pms, np.median(pms, 0).reshape(1, 2)).T[0]
-        # dist_plx = abs(np.median(plx) - plx)
 
         #
         pmRad = self.pmsplxSTDDEV * np.std(pms, 0).mean()
@@ -334,8 +316,8 @@ class fastMP:
         dpm_idxs = dist_pm.argsort().argsort()
         dplx_idxs = dist_plx.argsort().argsort()
         # Sum the positions for each element for all the dimensions
-        # idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
-        idx_sum = dxy_idxs + dpm_idxs
+        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        # idx_sum = dpm_idxs + dplx_idxs
         # Sort
         d_idxs = idx_sum.argsort()
 
