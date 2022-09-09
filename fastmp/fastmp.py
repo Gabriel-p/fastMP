@@ -93,16 +93,16 @@ class fastMP:
                 # plt.subplot(224)
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='r')
 
+                # Store from 'd_idxs' a number of stars given by 'st_idx'
+                st_idx = list(d_idxs)[:len(st_idx)]
+                if not st_idx:
+                    continue
+
                 # Remove filtered stars
                 msk = self.PMPlxFilterSTDDEV(
                     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
                     plx_c)
                 st_idx = list(np.array(st_idx)[msk])
-
-                # Store from 'd_idxs' a number of stars given by 'st_idx'
-                st_idx = list(d_idxs)[:len(st_idx)]
-                if not st_idx:
-                    continue
 
                 # plt.subplot(221)
                 # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='b')
@@ -255,6 +255,7 @@ class fastMP:
         plxRad = max(.5, .5 * plx_c)
 
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
+
         return msk
 
     def PMPlxFilterSTDDEV(self, pmRA, pmDE, plx, vpd_c, plx_c):
@@ -275,19 +276,14 @@ class fastMP:
         #
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
 
-        # print(pmRad, (dist_pm < pmRad).sum(), plxRad, (dist_plx < plxRad).sum(), len(pmRA), msk.sum())
-        # plt.subplot(131)
-        # # plt.scatter(pmRA, pmDE, alpha=.5)
-        # plt.hist(pmRA, alpha=.5, color='r')
-        # plt.hist(pmRA[msk], alpha=.5, color='b')
-        # plt.subplot(132)
-        # plt.hist(pmDE, alpha=.5, color='r')
-        # plt.hist(pmDE[msk], alpha=.5, color='b')
-        # plt.subplot(133)
-        # plt.hist(plx, alpha=.5, color='r')
-        # plt.hist(plx[msk], alpha=.5, color='b')
+        # print(len(plx), msk.sum(), pmRad, plxRad)
+        # plt.subplot(121)
+        # plt.scatter(pmRA, pmDE, alpha=.5, color='grey')
+        # plt.scatter(pmRA[msk], pmDE[msk], marker='x', color='r')
+        # plt.subplot(122)
+        # plt.hist(plx, alpha=.5, color='grey')
+        # plt.hist(plx[msk], alpha=.5, color='r')
         # plt.show()
-        # breakpoint()
 
         return msk
 
@@ -339,6 +335,7 @@ class fastMP:
         dplx_idxs = dist_plx.argsort().argsort()
         # Sum the positions for each element for all the dimensions
         idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        # idx_sum = dxy_idxs + dpm_idxs
         # Sort
         d_idxs = idx_sum.argsort()
 
@@ -346,6 +343,26 @@ class fastMP:
         dist_sum = dist_pm + dist_plx
         d_pm_plx_idxs = dist_sum.argsort()
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
+
+        # lon, lat = lon_lat.T
+        # def plot(N):
+        #     msk = d_idxs[:N]
+        #     plt.subplot(221)
+        #     plt.title(len(lon))
+        #     plt.scatter(lon, lat, alpha=.25, color='grey')
+        #     plt.scatter(lon[msk], lat[msk], marker='x', color='r')
+        #     plt.subplot(222)
+        #     plt.scatter(s_pmRA, s_pmDE, alpha=.25, color='grey')
+        #     plt.scatter(s_pmRA[msk], s_pmDE[msk], marker='x', color='r')
+        #     plt.subplot(223)
+        #     plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
+        #     plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
+        #     plt.subplot(224)
+        #     plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
+        #     plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
+        #     plt.show()
+        # plot(500)
+        # breakpoint()
 
         return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
 
