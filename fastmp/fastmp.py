@@ -232,8 +232,8 @@ class fastMP:
         dist_plx = abs(plx_c - plx)
 
         pmRad = max(3, .5 * abs(vpd_c[0]))
-        # plxRad = max(.5, .5 * plx_c)
 
+        # plxRad = max(.5, .5 * plx_c)
         d_pc = 1000 / plx_c
         plx_1, plx_2 = 1000 / (d_pc + 250), max(.05, 1000 / (d_pc - 250))
         plx_r = max(plx_c - plx_1, plx_2 - plx_c)
@@ -257,15 +257,6 @@ class fastMP:
 
         #
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
-
-        # print(len(plx), msk.sum(), pmRad, plxRad)
-        # plt.subplot(121)
-        # plt.scatter(pmRA, pmDE, alpha=.5, color='grey')
-        # plt.scatter(pmRA[msk], pmDE[msk], marker='x', color='r')
-        # plt.subplot(122)
-        # plt.hist(plx, alpha=.5, color='grey')
-        # plt.hist(plx[msk], alpha=.5, color='r')
-        # plt.show()
 
         return msk
 
@@ -316,8 +307,9 @@ class fastMP:
         dpm_idxs = dist_pm.argsort().argsort()
         dplx_idxs = dist_plx.argsort().argsort()
         # Sum the positions for each element for all the dimensions
-        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        # idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
         # idx_sum = dpm_idxs + dplx_idxs
+        idx_sum = dxy_idxs + dpm_idxs
         # Sort
         d_idxs = idx_sum.argsort()
 
@@ -329,21 +321,24 @@ class fastMP:
         # lon, lat = lon_lat.T
         # def plot(N):
         #     msk = d_idxs[:N]
+        #     print(np.std(s_pmRA[msk]), np.std(s_pmDE[msk]), np.std(s_Plx[msk]))
         #     plt.subplot(221)
-        #     plt.title(len(lon))
+        #     plt.title(N)
         #     plt.scatter(lon, lat, alpha=.25, color='grey')
         #     plt.scatter(lon[msk], lat[msk], marker='x', color='r')
         #     plt.subplot(222)
         #     plt.scatter(s_pmRA, s_pmDE, alpha=.25, color='grey')
         #     plt.scatter(s_pmRA[msk], s_pmDE[msk], marker='x', color='r')
         #     plt.subplot(223)
-        #     plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
-        #     plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
-        #     plt.subplot(224)
-        #     plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
-        #     plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
+        #     # plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
+        #     # plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
+        #     plt.hist(s_Plx, alpha=.5, color='grey', density=True)
+        #     plt.hist(s_Plx[msk], alpha=.5, color='b', density=True)
+        #     # plt.subplot(224)
+        #     # plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
+        #     # plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
         #     plt.show()
-        # plot(500)
+        # plot(50)
         # breakpoint()
 
         return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
