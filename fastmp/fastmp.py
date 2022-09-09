@@ -334,8 +334,8 @@ class fastMP:
         dpm_idxs = dist_pm.argsort().argsort()
         dplx_idxs = dist_plx.argsort().argsort()
         # Sum the positions for each element for all the dimensions
-        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
-        # idx_sum = dxy_idxs + dpm_idxs
+        # idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
+        idx_sum = dxy_idxs + dpm_idxs
         # Sort
         d_idxs = idx_sum.argsort()
 
