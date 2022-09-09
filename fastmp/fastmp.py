@@ -18,7 +18,7 @@ class fastMP:
                  N_resample=0,
                  N_std_d=5,
                  N_break=20,
-                 pmsplxSTDDEV=5,
+                 pmsplxSTDDEV=3,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
