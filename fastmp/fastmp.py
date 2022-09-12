@@ -18,7 +18,7 @@ class fastMP:
                  N_resample=0,
                  N_std_d=5,
                  N_break=20,
-                 pmsplxSTDDEV=3,
+                 pmsplxSTDDEV=5,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -54,8 +54,15 @@ class fastMP:
         print(xy_c, vpd_c, plx_c)
 
         # Remove obvious field stars
-        msk_accpt, lon, lat, pmRA, pmDE, plx = self.remField(
-            msk_accpt, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
+        msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c, True)
+        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
+            plx[msk]
+        # Update mask of accepted elements
+        i1 = np.arange(0, len(msk_accpt))
+        i2 = i1[msk_accpt]
+        i3 = i2[msk]
+        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
+        msk_accpt[i3] = True
 
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
@@ -99,7 +106,7 @@ class fastMP:
                     continue
 
                 # Filter field stars
-                msk = self.PMPlxFilterSTDDEV(
+                msk = self.PMPlxFilter(
                     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
                     plx_c)
                 st_idx = list(np.array(st_idx)[msk])
@@ -125,7 +132,8 @@ class fastMP:
                 N_runs += 1
                 N_membs.append(len(st_idx))
 
-        print(np.mean(N_membs), np.std(N_membs))
+        if N_membs:
+            print(np.mean(N_membs), np.std(N_membs))
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
@@ -208,42 +216,7 @@ class fastMP:
 
         return xy_c, vpd_c, plx_c
 
-    def remField(self, msk_accpt, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
-        """
-        Remove obvious field stars
-        """
-        msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c)
-        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
-            plx[msk]
-
-        i1 = np.arange(0, len(msk_accpt))
-        i2 = i1[msk_accpt]
-        i3 = i2[msk]
-        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
-        msk_accpt[i3] = True
-
-        return msk_accpt, lon, lat, pmRA, pmDE, plx
-
-    def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
-        """
-        Identify obvious field stars
-        """
-        dist_pm = cdist(np.array([pmRA, pmDE]).T, np.array([vpd_c])).T[0]
-        dist_plx = abs(plx_c - plx)
-
-        pmRad = max(3, .5 * abs(vpd_c[0]))
-
-        # plxRad = max(.5, .5 * plx_c)
-        d_pc = 1000 / plx_c
-        plx_1, plx_2 = 1000 / (d_pc + 250), max(.05, 1000 / (d_pc - 250))
-        plx_r = max(plx_c - plx_1, plx_2 - plx_c)
-        plxRad = max(.2, plx_r)
-
-        msk = (dist_pm < pmRad) & (dist_plx < plxRad)
-
-        return msk
-
-    def PMPlxFilterSTDDEV(self, pmRA, pmDE, plx, vpd_c, plx_c):
+    def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c, firstCall=False):
         """
         Identify obvious field stars
         """
@@ -251,9 +224,32 @@ class fastMP:
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - plx)
 
-        #
-        pmRad = self.pmsplxSTDDEV * np.std(pms, 0).mean()
-        plxRad = self.pmsplxSTDDEV * np.std(plx)
+        pmRad = max(3, .5 * abs(vpd_c[0])) # HARDCODED
+
+        # plxRad = max(.5, .5 * plx_c)
+        d_pc = 1000 / plx_c
+        plx_1, plx_2 = 1000 / (d_pc + 250), max(.05, 1000 / (d_pc - 250)) # HARDCODED
+        plx_r = max(plx_c - plx_1, plx_2 - plx_c)
+        plxRad = max(.2, plx_r) # HARDCODED
+
+        # msk = (dist_pm < pmRad) & (dist_plx < plxRad)
+
+    #     return msk
+
+    # def PMPlxFilterSTDDEV(self, pmRA, pmDE, plx, vpd_c, plx_c):
+        """
+        Identify obvious field stars
+        """
+        # pms = np.array([pmRA, pmDE]).T
+        # dist_pm = cdist(pms, np.array([vpd_c])).T[0]
+        # dist_plx = abs(plx_c - plx)
+
+        if firstCall is False:
+            pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
+            plxRad_std = self.pmsplxSTDDEV * np.std(plx)
+
+            pmRad = min(pmRad, pmRad_std)
+            plxRad = min(plxRad, plxRad_std)
 
         #
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
@@ -310,6 +306,7 @@ class fastMP:
         idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
         # idx_sum = dpm_idxs + dplx_idxs
         # idx_sum = dxy_idxs + dpm_idxs
+        # idx_sum = dxy_idxs + dplx_idxs
         # Sort
         d_idxs = idx_sum.argsort()
 
@@ -448,16 +445,22 @@ class fastMP:
     def assignProbs(self, msk_accpt, idx_selected, N_runs):
         """
         """
-        N_stars = msk_accpt.sum()
-        # Assign probabilities as averages of counts
-        values, counts = np.unique(idx_selected, return_counts=True)
-
-        probs = counts / N_runs
-        probs_all = np.zeros(N_stars)
-        probs_all[values] = probs
-
-        # Mark nans with '-1'
+        # Initial -1 probabilities for *all* stars
         probs_final = np.zeros(len(msk_accpt)) - 1
+
+        # Number of processed stars (ie: not rejected as nans)
+        N_stars = msk_accpt.sum()
+        # Initial zero probabilities for the processed stars
+        probs_all = np.zeros(N_stars)
+
+        if idx_selected:
+            # Estimate probabilities as averages of counts
+            values, counts = np.unique(idx_selected, return_counts=True)
+            probs = counts / N_runs
+            # Store probabilities for processed stars
+            probs_all[values] = probs
+
+        # Assign the estimated probabilities to the processed stars
         probs_final[msk_accpt] = probs_all
 
         return probs_final
