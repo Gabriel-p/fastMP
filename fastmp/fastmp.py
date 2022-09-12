@@ -11,26 +11,28 @@ import matplotlib.pyplot as plt
 class fastMP:
 
     def __init__(self,
+                 N_resample=0,
                  N_membs_min=25,
                  N_membs_max=50,
-                 # maxPMrad='auto',
-                 # maxPlxrad='auto',
-                 N_resample=0,
+                 hardPMRad=3,
+                 # hardPcRad=250,
+                 hardPlxRad=0.25,
+                 pmsplxSTDDEV=5,
                  N_std_d=5,
                  N_break=20,
-                 pmsplxSTDDEV=5,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
                  vpd_c=None):
+        self.N_resample = N_resample
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
-        # self.maxPMrad = maxPMrad
-        # self.maxPlxrad = maxPlxrad
-        self.N_resample = N_resample
+        self.hardPMRad = hardPMRad
+        # self.hardPcRad = hardPcRad
+        self.hardPlxRad = hardPlxRad
+        self.pmsplxSTDDEV = pmsplxSTDDEV
         self.N_std_d = N_std_d
         self.N_break = N_break
-        self.pmsplxSTDDEV = pmsplxSTDDEV
         self.N_bins = N_bins
         self.zoom_f = zoom_f
         self.N_zoom = N_zoom
@@ -51,18 +53,21 @@ class fastMP:
 
         # Estimate center
         xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
-        print(xy_c, vpd_c, plx_c)
 
         # Remove obvious field stars
         msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c, True)
+        # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
+        if self.N_resample > 0:
+            e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
+
         # Update mask of accepted elements
-        i1 = np.arange(0, len(msk_accpt))
-        i2 = i1[msk_accpt]
-        i3 = i2[msk]
-        msk_accpt = np.array([False for _ in np.arange(0, len(msk_accpt))])
-        msk_accpt[i3] = True
+        N_accpt = len(msk_accpt)
+        # Indexes accepted by both masks
+        idxs = np.arange(0, N_accpt)[msk_accpt][msk]
+        msk_accpt = np.full(N_accpt, False)
+        msk_accpt[idxs] = True
 
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
@@ -224,34 +229,26 @@ class fastMP:
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - plx)
 
-        pmRad = max(3, .5 * abs(vpd_c[0])) # HARDCODED
+        # Hard PMs limit
+        pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
 
-        # plxRad = max(.5, .5 * plx_c)
-        d_pc = 1000 / plx_c
-        plx_1, plx_2 = 1000 / (d_pc + 250), max(.05, 1000 / (d_pc - 250)) # HARDCODED
-        plx_r = max(plx_c - plx_1, plx_2 - plx_c)
-        plxRad = max(.2, plx_r) # HARDCODED
+        # # Hard Plx limit
+        # d_pc = 1000 / plx_c
+        # plx_min = 1000 / (d_pc + self.hardPcRad)
+        # plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
+        # plx_r = max(plx_c - plx_min, plx_max - plx_c)
+        # plxRad = max(self.hardPlxRad, plx_r)
 
-        # msk = (dist_pm < pmRad) & (dist_plx < plxRad)
-
-    #     return msk
-
-    # def PMPlxFilterSTDDEV(self, pmRA, pmDE, plx, vpd_c, plx_c):
-        """
-        Identify obvious field stars
-        """
-        # pms = np.array([pmRA, pmDE]).T
-        # dist_pm = cdist(pms, np.array([vpd_c])).T[0]
-        # dist_plx = abs(plx_c - plx)
+        plxRad = max(self.hardPlxRad, .5 * plx_c)  # HARDCODED
 
         if firstCall is False:
             pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
-            plxRad_std = self.pmsplxSTDDEV * np.std(plx)
-
             pmRad = min(pmRad, pmRad_std)
-            plxRad = min(plxRad, plxRad_std)
 
-        #
+            plxRad_std = self.pmsplxSTDDEV * np.std(plx)
+            # plxRad = max(self.hardPlxRad, min(plxRad, plxRad_std))
+            plxRad = max(self.hardPlxRad, plxRad_std)
+
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
 
         return msk
