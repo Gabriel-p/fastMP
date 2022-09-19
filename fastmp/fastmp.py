@@ -94,46 +94,49 @@ class fastMP:
                 if not st_idx:
                     continue
 
-                # plt.subplot(221)
-                # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='r')
-                # plt.subplot(222)
-                # # plt.hist(s_pmRA[st_idx], alpha=.5, color='r')
-                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], alpha=.5, color='r')
-                # plt.subplot(223)
-                # # plt.hist(s_pmDE[st_idx], alpha=.5, color='r')
-                # plt.scatter(s_pmRA[st_idx], s_Plx[st_idx], alpha=.5, color='r')
-                # plt.subplot(224)
-                # plt.hist(s_Plx[st_idx], alpha=.5, color='r')
+                st_idx2 = d_idxs[:len(st_idx)]
+                plx_min, plx_max = min(s_Plx[st_idx2]), max(s_Plx[st_idx2])
+                msk = (s_Plx[st_idx] < plx_min) | (s_Plx[st_idx] > plx_max)
+                if msk.sum() > 0:
+                    st_idx = np.array(list(st_idx2) + list(np.array(st_idx)[msk]))
+                else:
+                    st_idx = st_idx2
 
-                # Store from 'd_idxs' a number of stars given by 'st_idx'
-                st_idx = list(d_idxs)[:len(st_idx)]
-                if not st_idx:
-                    continue
+                # st_idx = np.array(list(set(list(d_idxs[:len(st_idx)]) + st_idx)))
+
+                # st_idx = d_idxs[:len(st_idx)]
+
+                # N = len(st_idx)
+                # plt.subplot(221)
+                # plt.scatter(lon[d_idxs_xy_pm][:N], lat[d_idxs_xy_pm][:N], alpha=.5, color='r')
+                # plt.scatter(lon[d_idxs_xy_plx][:N], lat[d_idxs_xy_plx][:N], alpha=.5, color='b')
+                # plt.scatter(lon[st_idx], lat[st_idx], color='k', marker='x')
+                # plt.subplot(222)
+                # plt.scatter(s_pmRA[d_idxs_xy_pm][:N], s_pmDE[d_idxs_xy_pm][:N], alpha=.5, color='r')
+                # plt.scatter(s_pmRA[d_idxs_xy_plx][:N], s_pmDE[d_idxs_xy_plx][:N], alpha=.5, color='b')
+                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], color='k', marker='x')
+                # plt.subplot(223)
+                # plt.hist(s_Plx[d_idxs_xy_pm][:N], alpha=.5, color='r')
+                # plt.hist(s_Plx[d_idxs_xy_plx][:N], alpha=.5, color='b')
+                # plt.hist(s_Plx[st_idx], alpha=.5, color='k')
+                # plt.show()
 
                 # Filter field stars
                 msk = self.PMPlxFilter(
                     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
                     plx_c)
-                st_idx = list(np.array(st_idx)[msk])
+                st_idx = st_idx[msk]
 
-                # plt.subplot(221)
-                # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5, color='b')
-                # plt.subplot(222)
-                # # plt.hist(s_pmRA[st_idx], alpha=.5, color='b')
-                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], alpha=.5, color='b')
-                # plt.subplot(223)
-                # # plt.hist(s_pmDE[st_idx], alpha=.5, color='b')
-                # plt.scatter(s_pmRA[st_idx], s_Plx[st_idx], alpha=.5, color='b')
-                # plt.subplot(224)
-                # plt.hist(s_Plx[st_idx], alpha=.5, color='b')
-                # plt.show()
+                # if not st_idx:
+                if not st_idx.any():
+                    continue
 
                 # Re-estimate centers using the selected stars
                 xy_c, vpd_c, plx_c = self.centXYPMPlx(
                     lon[st_idx], lat[st_idx], s_pmRA[st_idx],
                     s_pmDE[st_idx], s_Plx[st_idx])
 
-                idx_selected += st_idx
+                idx_selected += list(st_idx)
                 N_runs += 1
                 N_membs.append(len(st_idx))
 
@@ -301,41 +304,17 @@ class fastMP:
         dplx_idxs = dist_plx.argsort().argsort()
         # Sum the positions for each element for all the dimensions
         idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
-        # idx_sum = dpm_idxs + dplx_idxs
-        # idx_sum = dxy_idxs + dpm_idxs
-        # idx_sum = dxy_idxs + dplx_idxs
+        # idx_sum = np.sqrt(dxy_idxs**2 + dpm_idxs**2 + dplx_idxs**2)
         # Sort
         d_idxs = idx_sum.argsort()
 
         # Sort distances using only PMs+Plx
         dist_sum = dist_pm + dist_plx
+        # dist_sum = np.sqrt(dist_pm**2 + dist_plx**2)
         d_pm_plx_idxs = dist_sum.argsort()
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
-        # lon, lat = lon_lat.T
-        # def plot(N):
-        #     msk = d_idxs[:N]
-        #     print(np.std(s_pmRA[msk]), np.std(s_pmDE[msk]), np.std(s_Plx[msk]))
-        #     plt.subplot(221)
-        #     plt.title(N)
-        #     plt.scatter(lon, lat, alpha=.25, color='grey')
-        #     plt.scatter(lon[msk], lat[msk], marker='x', color='r')
-        #     plt.subplot(222)
-        #     plt.scatter(s_pmRA, s_pmDE, alpha=.25, color='grey')
-        #     plt.scatter(s_pmRA[msk], s_pmDE[msk], marker='x', color='r')
-        #     plt.subplot(223)
-        #     # plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
-        #     # plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
-        #     plt.hist(s_Plx, alpha=.5, color='grey', density=True)
-        #     plt.hist(s_Plx[msk], alpha=.5, color='b', density=True)
-        #     # plt.subplot(224)
-        #     # plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
-        #     # plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
-        #     plt.show()
-        # plot(50)
-        # breakpoint()
-
-        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted  # d_idxs_xy_pm, d_idxs_xy_plx
 
     def getStars(self, lon, lat, d_idxs, d_sorted, N_clust):
         """
@@ -358,6 +337,7 @@ class fastMP:
             Description
         """
         N_stars = len(lon)
+        xy = np.array([lon, lat]).T
 
         # Select those clusters where the stars are different enough from a
         # random distribution
@@ -369,9 +349,9 @@ class fastMP:
         N_break_count, step_old, ld_avrg, ld_std, d_avrg = 0, 0, 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
-            xy = np.array([lon[msk], lat[msk]]).T
+            # xy = np.array([lon[msk], lat[msk]]).T
 
-            C_s = self.rkfunc(xy, self.rads, self.Kest)
+            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
@@ -390,10 +370,37 @@ class fastMP:
                     # Break condition 2
                     N_break_count += 1
 
+            # def plot():
+            #     msk = idxs_survived
+            #     print(np.std(
+            #         s_pmRA[msk]), np.std(s_pmDE[msk]), np.std(s_Plx[msk]))
+            #     plt.subplot(221)
+            #     plt.scatter(lon, lat, alpha=.25, color='grey')
+            #     plt.scatter(lon[msk], lat[msk], marker='x', color='r')
+            #     plt.subplot(222)
+            #     plt.scatter(s_pmRA, s_pmDE, alpha=.25, color='grey')
+            #     plt.scatter(s_pmRA[msk], s_pmDE[msk], marker='x', color='r')
+            #     plt.subplot(223)
+            #     # plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
+            #     # plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
+            #     plt.hist(s_Plx, alpha=.5, color='grey', density=True)
+            #     plt.hist(s_Plx[msk], alpha=.5, color='b', density=True)
+            #     # plt.subplot(224)
+            #     # plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
+            #     # plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
+            #     plt.show()
+            # if C_s >= C_thresh:
+            #     print("accepted")
+            # else:
+            #     print("rejected")
+            # plot()
+
             if N_break_count == self.N_break:
             # if N_break_count * N_clust > len(idxs_survived):
+                # print("N_break")
                 break
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
+                # print("d_avrg")
                 break
 
             step_old = step
