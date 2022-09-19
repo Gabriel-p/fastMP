@@ -15,9 +15,8 @@ class fastMP:
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
-                 # hardPcRad=250,
                  hardPlxRad=0.25,
-                 pmsplxSTDDEV=5,
+                 pmsplxSTDDEV=3,
                  N_std_d=5,
                  N_break=20,
                  N_bins=50,
@@ -75,7 +74,6 @@ class fastMP:
         # Pack data
         data_3 = np.array([pmRA, pmDE, plx])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
-        lon_lat = np.array([lon, lat]).T
 
         N_runs, idx_selected, N_membs = 0, [], []
         for _ in range(self.N_resample + 1):
@@ -86,9 +84,9 @@ class fastMP:
 
                 # Obtain indexes and distances of stars to the center
                 d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
-                    lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
+                    lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
 
-                # Most probable members given their indexed distances
+                # Most probable members given their distances
                 st_idx = self.getStars(
                     lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
                 if not st_idx:
@@ -111,11 +109,11 @@ class fastMP:
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='k')
                 # plt.show()
 
-                # # Filter field stars
-                # msk = self.PMPlxFilter(
-                #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                #     plx_c)
-                # st_idx = st_idx[msk]
+                # Filter field stars
+                msk = self.PMPlxFilter(
+                    s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                    plx_c)
+                st_idx = st_idx[msk]
 
                 # if not st_idx:
                 if not st_idx.any():
@@ -225,13 +223,7 @@ class fastMP:
         # Hard PMs limit
         pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
 
-        # # Hard Plx limit
-        # d_pc = 1000 / plx_c
-        # plx_min = 1000 / (d_pc + self.hardPcRad)
-        # plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
-        # plx_r = max(plx_c - plx_min, plx_max - plx_c)
-        # plxRad = max(self.hardPlxRad, plx_r)
-
+        # Hard Plx limit
         plxRad = max(self.hardPlxRad, .5 * plx_c)  # HARDCODED
 
         if firstCall is False:
@@ -239,7 +231,6 @@ class fastMP:
             pmRad = min(pmRad, pmRad_std)
 
             plxRad_std = self.pmsplxSTDDEV * np.std(plx)
-            # plxRad = max(self.hardPlxRad, min(plxRad, plxRad_std))
             plxRad = max(self.hardPlxRad, plxRad_std)
 
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
@@ -276,12 +267,12 @@ class fastMP:
         return data_3 + grs * data_err
 
     def getDists(
-            self, lon_lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c):
+            self, lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
-        lon, lat = lon_lat.T
+        # Sort distances using XY+PMs+Plx
         all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T
         all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
         all_dist = cdist(all_data, all_c).T[0]
@@ -295,33 +286,6 @@ class fastMP:
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
         return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
-
-
-
-        dist_xy = cdist(lon_lat, np.array([xy_c])).T[0]
-        dist_pm = cdist(np.array([s_pmRA, s_pmDE]).T, np.array([vpd_c])).T[0]
-        dist_plx = abs(plx_c - s_Plx)
-
-        # The first argsort() returns the indexes ordered by smallest distance,
-        # the second argsort() returns those indexes ordered from min to max.
-        # The resulting arrays contain the position for each element in the
-        # input arrays according to their minimum distances in each dimension
-        dxy_idxs = dist_xy.argsort().argsort()
-        dpm_idxs = dist_pm.argsort().argsort()
-        dplx_idxs = dist_plx.argsort().argsort()
-        # Sum the positions for each element for all the dimensions
-        idx_sum = dxy_idxs + dpm_idxs + dplx_idxs
-        # idx_sum = np.sqrt(dxy_idxs**2 + dpm_idxs**2 + dplx_idxs**2)
-        # Sort
-        d_idxs = idx_sum.argsort()
-
-        # Sort distances using only PMs+Plx
-        dist_sum = dist_pm + dist_plx
-        # dist_sum = np.sqrt(dist_pm**2 + dist_plx**2)
-        d_pm_plx_idxs = dist_sum.argsort()
-        d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
-
-        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted  # d_idxs_xy_pm, d_idxs_xy_plx
 
     def getStars(self, lon, lat, d_idxs, d_sorted, N_clust):
         """
@@ -356,7 +320,6 @@ class fastMP:
         N_break_count, step_old, ld_avrg, ld_std, d_avrg = 0, 0, 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
-            # xy = np.array([lon[msk], lat[msk]]).T
 
             C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
             if not np.isnan(C_s):
@@ -366,7 +329,6 @@ class fastMP:
 
                     # Break condition 1
                     d_avrg = np.median(d_sorted[step_old:step])
-                    # d_std = np.std(dist_sorted[step_old:step])
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
                     last_dists = 1. * d_sorted[step_old:step]
@@ -377,9 +339,11 @@ class fastMP:
                     # Break condition 2
                     N_break_count += 1
 
-            if N_break_count == self.N_break:
-                break
+            # Break condition 1
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
+                break
+            # Break condition 2
+            if N_break_count == self.N_break:
                 break
 
             step_old = step
