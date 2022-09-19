@@ -94,17 +94,7 @@ class fastMP:
                 if not st_idx:
                     continue
 
-                st_idx2 = d_idxs[:len(st_idx)]
-                plx_min, plx_max = min(s_Plx[st_idx2]), max(s_Plx[st_idx2])
-                msk = (s_Plx[st_idx] < plx_min) | (s_Plx[st_idx] > plx_max)
-                if msk.sum() > 0:
-                    st_idx = np.array(list(st_idx2) + list(np.array(st_idx)[msk]))
-                else:
-                    st_idx = st_idx2
-
-                # st_idx = np.array(list(set(list(d_idxs[:len(st_idx)]) + st_idx)))
-
-                # st_idx = d_idxs[:len(st_idx)]
+                st_idx = d_idxs[:len(st_idx)]
 
                 # N = len(st_idx)
                 # plt.subplot(221)
@@ -121,11 +111,11 @@ class fastMP:
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='k')
                 # plt.show()
 
-                # Filter field stars
-                msk = self.PMPlxFilter(
-                    s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                    plx_c)
-                st_idx = st_idx[msk]
+                # # Filter field stars
+                # msk = self.PMPlxFilter(
+                #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                #     plx_c)
+                # st_idx = st_idx[msk]
 
                 # if not st_idx:
                 if not st_idx.any():
@@ -291,6 +281,23 @@ class fastMP:
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
+        lon, lat = lon_lat.T
+        all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T
+        all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
+        all_dist = cdist(all_data, all_c).T[0]
+        d_idxs = all_dist.argsort()
+
+        # Sort distances using only PMs+Plx
+        all_data = np.array([s_pmRA, s_pmDE, s_Plx]).T
+        all_c = np.array([list(vpd_c) + [plx_c]])
+        dist_sum = cdist(all_data, all_c).T[0]
+        d_pm_plx_idxs = dist_sum.argsort()
+        d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
+
+        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+
+
+
         dist_xy = cdist(lon_lat, np.array([xy_c])).T[0]
         dist_pm = cdist(np.array([s_pmRA, s_pmDE]).T, np.array([vpd_c])).T[0]
         dist_plx = abs(plx_c - s_Plx)
@@ -370,37 +377,9 @@ class fastMP:
                     # Break condition 2
                     N_break_count += 1
 
-            # def plot():
-            #     msk = idxs_survived
-            #     print(np.std(
-            #         s_pmRA[msk]), np.std(s_pmDE[msk]), np.std(s_Plx[msk]))
-            #     plt.subplot(221)
-            #     plt.scatter(lon, lat, alpha=.25, color='grey')
-            #     plt.scatter(lon[msk], lat[msk], marker='x', color='r')
-            #     plt.subplot(222)
-            #     plt.scatter(s_pmRA, s_pmDE, alpha=.25, color='grey')
-            #     plt.scatter(s_pmRA[msk], s_pmDE[msk], marker='x', color='r')
-            #     plt.subplot(223)
-            #     # plt.scatter(s_Plx, s_pmRA, alpha=.25, color='grey')
-            #     # plt.scatter(s_Plx[msk], s_pmRA[msk], marker='x', color='r')
-            #     plt.hist(s_Plx, alpha=.5, color='grey', density=True)
-            #     plt.hist(s_Plx[msk], alpha=.5, color='b', density=True)
-            #     # plt.subplot(224)
-            #     # plt.scatter(s_Plx, s_pmDE, alpha=.25, color='grey')
-            #     # plt.scatter(s_Plx[msk], s_pmDE[msk], marker='x', color='r')
-            #     plt.show()
-            # if C_s >= C_thresh:
-            #     print("accepted")
-            # else:
-            #     print("rejected")
-            # plot()
-
             if N_break_count == self.N_break:
-            # if N_break_count * N_clust > len(idxs_survived):
-                # print("N_break")
                 break
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
-                # print("d_avrg")
                 break
 
             step_old = step
