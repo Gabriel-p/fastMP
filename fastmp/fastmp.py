@@ -11,19 +11,19 @@ import matplotlib.pyplot as plt
 class fastMP:
 
     def __init__(self,
-                 N_resample=0,
+                 resample_flag=False,
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.25,
-                 # pmsplxSTDDEV=5,
+                 # pmsplxSTDDEV=3,
                  N_std_d=5,
-                 N_break=1,
+                 N_break=20,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
                  vpd_c=None):
-        self.N_resample = N_resample
+        self.resample_flag = resample_flag
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
@@ -43,7 +43,7 @@ class fastMP:
         msk_accpt, X = self.nanRjct(X)
 
         # Unpack input data
-        if self.N_resample > 0:
+        if self.resample_flag is True:
             lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
         else:
             lon, lat, pmRA, pmDE, plx = X
@@ -57,7 +57,7 @@ class fastMP:
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
-        if self.N_resample > 0:
+        if self.resample_flag is True:
             e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
 
         # Update mask of accepted elements
@@ -75,64 +75,48 @@ class fastMP:
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
         N_runs, idx_selected, N_membs = 0, [], []
-        for _ in range(self.N_resample + 1):
+        for N_clust in range(self.N_membs_min, self.N_membs_max):
+
             # Sample data (if requested)
             s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
-            for N_clust in range(self.N_membs_min, self.N_membs_max):
+            # Obtain indexes and distances of stars to the center
+            d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
+                lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
 
-                # Obtain indexes and distances of stars to the center
-                d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
-                    lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
+            # Most probable members given their distances
+            st_idx = self.getStars(
+                lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+            if not st_idx:
+                continue
 
-                # Most probable members given their distances
-                st_idx = self.getStars(
-                    lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
-                if not st_idx:
-                    continue
+            st_idx = d_idxs[:len(st_idx)]
 
-                st_idx = d_idxs[:len(st_idx)]
+            # # Filter field stars
+            # msk = self.PMPlxFilter(
+            #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+            #     plx_c)
+            # st_idx = st_idx[msk]
 
-                # N = len(st_idx)
-                # plt.subplot(221)
-                # plt.scatter(lon[d_idxs_xy_pm][:N], lat[d_idxs_xy_pm][:N], alpha=.5, color='r')
-                # plt.scatter(lon[d_idxs_xy_plx][:N], lat[d_idxs_xy_plx][:N], alpha=.5, color='b')
-                # plt.scatter(lon[st_idx], lat[st_idx], color='k', marker='x')
-                # plt.subplot(222)
-                # plt.scatter(s_pmRA[d_idxs_xy_pm][:N], s_pmDE[d_idxs_xy_pm][:N], alpha=.5, color='r')
-                # plt.scatter(s_pmRA[d_idxs_xy_plx][:N], s_pmDE[d_idxs_xy_plx][:N], alpha=.5, color='b')
-                # plt.scatter(s_pmRA[st_idx], s_pmDE[st_idx], color='k', marker='x')
-                # plt.subplot(223)
-                # plt.hist(s_Plx[d_idxs_xy_pm][:N], alpha=.5, color='r')
-                # plt.hist(s_Plx[d_idxs_xy_plx][:N], alpha=.5, color='b')
-                # plt.hist(s_Plx[st_idx], alpha=.5, color='k')
-                # plt.show()
+            # if not st_idx:
+            if not st_idx.any():
+                continue
 
-                # # Filter field stars
-                # msk = self.PMPlxFilter(
-                #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                #     plx_c)
-                # st_idx = st_idx[msk]
+            # Re-estimate centers using the selected stars
+            xy_c, vpd_c, plx_c = self.centXYPMPlx(
+                lon[st_idx], lat[st_idx], s_pmRA[st_idx],
+                s_pmDE[st_idx], s_Plx[st_idx])
 
-                # if not st_idx:
-                if not st_idx.any():
-                    continue
-
-                # # Re-estimate centers using the selected stars
-                # xy_c, vpd_c, plx_c = self.centXYPMPlx(
-                #     lon[st_idx], lat[st_idx], s_pmRA[st_idx],
-                #     s_pmDE[st_idx], s_Plx[st_idx])
-
-                idx_selected += list(st_idx)
-                N_runs += 1
-                N_membs.append(len(st_idx))
+            idx_selected += list(st_idx)
+            N_runs += 1
+            N_membs.append(len(st_idx))
 
         if N_membs:
-            print(int(np.median(N_membs))) #, np.std(N_membs))
+            N_membs = int(np.median(N_membs))
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
-        return probs_final
+        return probs_final, N_membs
 
     def nanRjct(self, data):
         """
@@ -260,7 +244,7 @@ class fastMP:
         """
         Gaussian random sample
         """
-        if self.N_resample == 0:
+        if self.resample_flag is False:
             return data_3
         grs = np.random.normal(0., 1., data_3.shape[1])
         return data_3 + grs * data_err
@@ -288,23 +272,6 @@ class fastMP:
 
     def getStars(self, lon, lat, d_idxs, d_sorted, N_clust):
         """
-        Parameters
-        ----------
-        Kest : TYPE
-            Description
-        rads : TYPE
-            Description
-        lon : TYPE
-            Description
-        lat : TYPE
-            Description
-        d_idxs : TYPE
-            Description
-
-        Returns
-        -------
-        TYPE
-            Description
         """
         N_stars = len(lon)
         xy = np.array([lon, lat]).T
