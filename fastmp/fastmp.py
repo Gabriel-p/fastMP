@@ -16,9 +16,9 @@ class fastMP:
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.25,
-                 pmsplxSTDDEV=3,
+                 # pmsplxSTDDEV=5,
                  N_std_d=5,
-                 N_break=20,
+                 N_break=1,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -27,9 +27,8 @@ class fastMP:
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
-        # self.hardPcRad = hardPcRad
         self.hardPlxRad = hardPlxRad
-        self.pmsplxSTDDEV = pmsplxSTDDEV
+        # self.pmsplxSTDDEV = pmsplxSTDDEV
         self.N_std_d = N_std_d
         self.N_break = N_break
         self.N_bins = N_bins
@@ -109,27 +108,27 @@ class fastMP:
                 # plt.hist(s_Plx[st_idx], alpha=.5, color='k')
                 # plt.show()
 
-                # Filter field stars
-                msk = self.PMPlxFilter(
-                    s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                    plx_c)
-                st_idx = st_idx[msk]
+                # # Filter field stars
+                # msk = self.PMPlxFilter(
+                #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                #     plx_c)
+                # st_idx = st_idx[msk]
 
                 # if not st_idx:
                 if not st_idx.any():
                     continue
 
-                # Re-estimate centers using the selected stars
-                xy_c, vpd_c, plx_c = self.centXYPMPlx(
-                    lon[st_idx], lat[st_idx], s_pmRA[st_idx],
-                    s_pmDE[st_idx], s_Plx[st_idx])
+                # # Re-estimate centers using the selected stars
+                # xy_c, vpd_c, plx_c = self.centXYPMPlx(
+                #     lon[st_idx], lat[st_idx], s_pmRA[st_idx],
+                #     s_pmDE[st_idx], s_Plx[st_idx])
 
                 idx_selected += list(st_idx)
                 N_runs += 1
                 N_membs.append(len(st_idx))
 
         if N_membs:
-            print(np.mean(N_membs), np.std(N_membs))
+            print(int(np.median(N_membs))) #, np.std(N_membs))
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
@@ -332,9 +331,6 @@ class fastMP:
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
                     last_dists = 1. * d_sorted[step_old:step]
-
-                    # Reset break condition 2
-                    # N_break_count = 0
                 else:
                     # Break condition 2
                     N_break_count += 1
