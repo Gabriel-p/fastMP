@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 class fastMP:
 
     def __init__(self,
-                 resample_flag=False,
+                 # resample_flag=False,
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
@@ -24,7 +24,7 @@ class fastMP:
                  zoom_f=4,
                  N_zoom=10,
                  vpd_c=None):
-        self.resample_flag = resample_flag
+        # self.resample_flag = resample_flag
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
@@ -45,11 +45,11 @@ class fastMP:
         msk_accpt, X = self.nanRjct(X)
 
         # Unpack input data
-        if self.resample_flag is True:
-            lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
-        else:
-            lon, lat, pmRA, pmDE, plx = X
-            e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
+        # if self.resample_flag is True:
+        # lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
+        # else:
+        lon, lat, pmRA, pmDE, plx = X
+        #     e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
         # Estimate center
         xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
@@ -59,8 +59,8 @@ class fastMP:
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
-        if self.resample_flag is True:
-            e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
+        # if self.resample_flag is True:
+        #     e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
 
         # Update mask of accepted elements
         N_accpt = len(msk_accpt)
@@ -72,41 +72,41 @@ class fastMP:
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
 
-        # Pack data
-        data_3 = np.array([pmRA, pmDE, plx])
-        data_err = np.array([e_pmRA, e_pmDE, e_plx])
+        # Pack data used below
+        xy = np.array([lon, lat]).T
+        # data_3 = np.array([pmRA, pmDE, plx])
+        # data_err = np.array([e_pmRA, e_pmDE, e_plx])
+        all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
+        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
 
         N_runs, idx_selected, N_membs = 0, [], []
         for N_clust in range(self.N_membs_min, self.N_membs_max):
 
             # Sample data (if requested)
-            s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
+            # s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
             # Obtain indexes and distances of stars to the center
             d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
-                lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c)
+                all_data, PMsPlx_data, xy_c, vpd_c, plx_c)
 
             # Most probable members given their distances
-            st_idx = self.getStars(
-                lon, lat, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
-            if not st_idx:
+            N_survived = self.getStars(
+                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+            if N_survived <= 5:  # HARDCODED
                 continue
 
-            st_idx = d_idxs[:len(st_idx)]
+            # Star selection
+            st_idx = d_idxs[:N_survived]
 
-            # Filter field stars
+            # Filter outlier field stars
             msk = self.PMPlxFilter(
-                s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-                plx_c)
-            print(len(st_idx), msk.sum())
+                pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
             st_idx = st_idx[msk]
-
-            print(N_clust, len(st_idx))
 
             # Re-estimate centers using the selected stars
             xy_c, vpd_c, plx_c = self.centXYPMPlx(
-                lon[st_idx], lat[st_idx], s_pmRA[st_idx],
-                s_pmDE[st_idx], s_Plx[st_idx])
+                lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
+                plx[st_idx])
 
             idx_selected += list(st_idx)
             N_runs += 1
@@ -114,7 +114,6 @@ class fastMP:
 
         if N_membs:
             N_membs = int(np.median(N_membs))
-        # print(N_membs)
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
@@ -209,15 +208,12 @@ class fastMP:
         pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
 
         # Hard Plx limit
-        # plxRad = max(self.hardPlxRad, .5 * plx_c)  # HARDCODED
-
         d_pc = 1000 / plx_c
         plx_min = 1000 / (d_pc + self.hardPcRad)
         plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
         # plx_r = max(plx_c - plx_min, plx_max - plx_c)
         plx_r = .5 * (plx_max - plx_min)
         plxRad = max(self.hardPlxRad, plx_r)
-        print(plx_min, plx_max, plx_r, plxRad)
 
         # if firstCall is False:
         #     pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
@@ -250,50 +246,46 @@ class fastMP:
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def dataSample(self, data_3, data_err):
-        """
-        Gaussian random sample
-        """
-        if self.resample_flag is False:
-            return data_3
-        grs = np.random.normal(0., 1., data_3.shape[1])
-        return data_3 + grs * data_err
+    # def dataSample(self, data_3, data_err):
+    #     """
+    #     Gaussian random sample
+    #     """
+    #     if self.resample_flag is False:
+    #         return data_3
+    #     grs = np.random.normal(0., 1., data_3.shape[1])
+    #     return data_3 + grs * data_err
 
-    def getDists(
-            self, lon, lat, s_pmRA, s_pmDE, s_Plx, xy_c, vpd_c, plx_c):
+    def getDists(self, all_data, PMsPlx_data, xy_c, vpd_c, plx_c):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
         # Sort distances using XY+PMs+Plx
-        all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_Plx]).T
         all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
         all_dist = cdist(all_data, all_c).T[0]
         d_idxs = all_dist.argsort()
 
         # Sort distances using only PMs+Plx
-        all_data = np.array([s_pmRA, s_pmDE, s_Plx]).T
         all_c = np.array([list(vpd_c) + [plx_c]])
-        dist_sum = cdist(all_data, all_c).T[0]
+        dist_sum = cdist(PMsPlx_data, all_c).T[0]
         d_pm_plx_idxs = dist_sum.argsort()
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
         return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
 
-    def getStars(self, lon, lat, d_idxs, d_sorted, N_clust):
+    def getStars(self, xy, d_idxs, d_sorted, N_clust):
         """
         """
-        N_stars = len(lon)
-        xy = np.array([lon, lat]).T
+        N_stars = xy.shape[0]
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        idxs_survived = []
+        N_survived, step_old = 0, 0
 
         C_thresh = self.C_thresh_N / N_clust
 
         last_dists = [100000]
-        N_break_count, step_old, ld_avrg, ld_std, d_avrg = 0, 0, 0, 0, -np.inf
+        N_break_count, ld_avrg, ld_std, d_avrg = 0, 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
 
@@ -301,13 +293,13 @@ class fastMP:
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
-                    idxs_survived += list(msk)
+                    # idxs_survived += list(msk)
+                    N_survived += N_clust
 
                     # Break condition 1
                     d_avrg = np.median(d_sorted[step_old:step])
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
-                    # ld_std = min(abs(ld_avrg - np.percentile(last_dists, (16, 84))))
                     last_dists = 1. * d_sorted[step_old:step]
                 else:
                     # Break condition 2
@@ -315,16 +307,14 @@ class fastMP:
 
             # Break condition 1
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
-                print("d_avrg")
                 break
             # Break condition 2
             if N_break_count == self.N_break:
-                print("N_break")
                 break
 
             step_old = step
 
-        return idxs_survived
+        return N_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
