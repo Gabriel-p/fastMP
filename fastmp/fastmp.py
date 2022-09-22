@@ -5,8 +5,6 @@ from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
 from scipy.stats import gaussian_kde
 
-import matplotlib.pyplot as plt
-
 
 class fastMP:
 
@@ -17,7 +15,7 @@ class fastMP:
                  hardPlxRad=0.2,
                  hardPcRad=15,
                  N_std_d=5,
-                 N_break=20,
+                 # N_break=20,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -28,7 +26,7 @@ class fastMP:
         self.hardPlxRad = hardPlxRad
         self.hardPcRad = hardPcRad
         self.N_std_d = N_std_d
-        self.N_break = N_break
+        # self.N_break = N_break
         self.N_bins = N_bins
         self.zoom_f = zoom_f
         self.N_zoom = N_zoom
@@ -43,21 +41,9 @@ class fastMP:
         # Unpack input data
         lon, lat, pmRA, pmDE, plx = X
 
-        # Estimate center
-        xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
-
-        # Remove obvious field stars
-        msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c, True)
-        # Update arrays
-        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
-            plx[msk]
-
-        # Update mask of accepted elements
-        N_accpt = len(msk_accpt)
-        # Indexes accepted by both masks
-        idxs = np.arange(0, N_accpt)[msk_accpt][msk]
-        msk_accpt = np.full(N_accpt, False)
-        msk_accpt[idxs] = True
+        # Remove the most obvious field stars to speed up the process
+        msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c =\
+            self.firstFilter(msk_accpt, lon, lat, pmRA, pmDE, plx)
 
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
@@ -77,6 +63,7 @@ class fastMP:
             # Most probable members given their distances
             N_survived = self.getStars(
                 xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+
             if N_survived <= 5:  # HARDCODED
                 continue
 
@@ -117,6 +104,27 @@ class fastMP:
         msk_accpt = np.logical_and.reduce(msk_all)
 
         return msk_accpt, data.T[msk_accpt].T
+
+    def firstFilter(self, msk_accpt, lon, lat, pmRA, pmDE, plx):
+        """
+        """
+        # Estimate initial center
+        xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
+
+        # Remove obvious field stars
+        msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c)
+        # Update arrays
+        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
+            plx[msk]
+
+        # Update mask of accepted elements
+        N_accpt = len(msk_accpt)
+        # Indexes accepted by both masks
+        idxs = np.arange(0, N_accpt)[msk_accpt][msk]
+        msk_accpt = np.full(N_accpt, False)
+        msk_accpt[idxs] = True
+
+        return msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c
 
     def centXYPMPlx(self, lon, lat, pmRA, pmDE, Plx):
         """
@@ -181,13 +189,13 @@ class fastMP:
 
         return xy_c, vpd_c, plx_c
 
-    def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c, firstCall=False):
+    def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
         Identify obvious field stars
         """
         pms = np.array([pmRA, pmDE]).T
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
-        dist_plx = abs(plx_c - plx)
+        # dist_plx = abs(plx_c - plx)
 
         # Hard PMs limit
         pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
@@ -196,11 +204,11 @@ class fastMP:
         d_pc = 1000 / plx_c
         plx_min = 1000 / (d_pc + self.hardPcRad)
         plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
-        # plx_r = max(plx_c - plx_min, plx_max - plx_c)
-        plx_r = .5 * (plx_max - plx_min)
-        plxRad = max(self.hardPlxRad, plx_r)
+        plxRad_min = max(self.hardPlxRad, plx_c - plx_min)
+        plxRad_max = max(self.hardPlxRad, plx_max - plx_c)
 
-        msk = (dist_pm < pmRad) & (dist_plx < plxRad)
+        msk = (dist_pm < pmRad) & (plx - plx_c < plxRad_max)\
+            & (plx_c - plx < plxRad_min)
 
         return msk
 
@@ -254,7 +262,8 @@ class fastMP:
         C_thresh = self.C_thresh_N / N_clust
 
         last_dists = [100000]
-        N_break_count, ld_avrg, ld_std, d_avrg = 0, 0, 0, -np.inf
+        # N_break_count = 0
+        ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
             msk = d_idxs[step_old:step]
 
@@ -264,21 +273,21 @@ class fastMP:
                 if C_s >= C_thresh:
                     N_survived += N_clust
 
-                    # Break condition 1
+                    # Break condition
                     d_avrg = np.median(d_sorted[step_old:step])
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
                     last_dists = 1. * d_sorted[step_old:step]
-                else:
-                    # Break condition 2
-                    N_break_count += 1
+                # else:
+                #     # Break condition 2
+                #     N_break_count += 1
 
-            # Break condition 1
+            # Break condition
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
                 break
-            # Break condition 2
-            if N_break_count == self.N_break:
-                break
+            # # Break condition 2
+            # if N_break_count == self.N_break:
+            #     break
 
             step_old = step
 
