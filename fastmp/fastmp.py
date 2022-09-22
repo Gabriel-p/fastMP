@@ -11,26 +11,22 @@ import matplotlib.pyplot as plt
 class fastMP:
 
     def __init__(self,
-                 # resample_flag=False,
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
                  hardPcRad=15,
-                 # pmsplxSTDDEV=3,
                  N_std_d=5,
                  N_break=20,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
                  vpd_c=None):
-        # self.resample_flag = resample_flag
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
         self.hardPlxRad = hardPlxRad
         self.hardPcRad = hardPcRad
-        # self.pmsplxSTDDEV = pmsplxSTDDEV
         self.N_std_d = N_std_d
         self.N_break = N_break
         self.N_bins = N_bins
@@ -45,11 +41,7 @@ class fastMP:
         msk_accpt, X = self.nanRjct(X)
 
         # Unpack input data
-        # if self.resample_flag is True:
-        # lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
-        # else:
         lon, lat, pmRA, pmDE, plx = X
-        #     e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
         # Estimate center
         xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
@@ -59,8 +51,6 @@ class fastMP:
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
-        # if self.resample_flag is True:
-        #     e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
 
         # Update mask of accepted elements
         N_accpt = len(msk_accpt)
@@ -74,16 +64,11 @@ class fastMP:
 
         # Pack data used below
         xy = np.array([lon, lat]).T
-        # data_3 = np.array([pmRA, pmDE, plx])
-        # data_err = np.array([e_pmRA, e_pmDE, e_plx])
         all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
         PMsPlx_data = np.array([pmRA, pmDE, plx]).T
 
         N_runs, idx_selected, N_membs = 0, [], []
         for N_clust in range(self.N_membs_min, self.N_membs_max):
-
-            # Sample data (if requested)
-            # s_pmRA, s_pmDE, s_Plx = self.dataSample(data_3, data_err)
 
             # Obtain indexes and distances of stars to the center
             d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
@@ -215,13 +200,6 @@ class fastMP:
         plx_r = .5 * (plx_max - plx_min)
         plxRad = max(self.hardPlxRad, plx_r)
 
-        # if firstCall is False:
-        #     pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
-        #     pmRad = min(pmRad, pmRad_std)
-
-        #     plxRad_std = self.pmsplxSTDDEV * np.std(plx)
-        #     plxRad = max(self.hardPlxRad, plxRad_std)
-
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
 
         return msk
@@ -245,15 +223,6 @@ class fastMP:
         C_thresh_N = 1.68 * np.sqrt(area)  # HARDCODED
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
-
-    # def dataSample(self, data_3, data_err):
-    #     """
-    #     Gaussian random sample
-    #     """
-    #     if self.resample_flag is False:
-    #         return data_3
-    #     grs = np.random.normal(0., 1., data_3.shape[1])
-    #     return data_3 + grs * data_err
 
     def getDists(self, all_data, PMsPlx_data, xy_c, vpd_c, plx_c):
         """
@@ -293,7 +262,6 @@ class fastMP:
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
-                    # idxs_survived += list(msk)
                     N_survived += N_clust
 
                     # Break condition 1
