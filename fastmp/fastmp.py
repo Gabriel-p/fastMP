@@ -15,7 +15,8 @@ class fastMP:
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
-                 hardPlxRad=0.25,
+                 hardPlxRad=0.2,
+                 hardPcRad=15,
                  # pmsplxSTDDEV=3,
                  N_std_d=5,
                  N_break=20,
@@ -28,6 +29,7 @@ class fastMP:
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
         self.hardPlxRad = hardPlxRad
+        self.hardPcRad = hardPcRad
         # self.pmsplxSTDDEV = pmsplxSTDDEV
         self.N_std_d = N_std_d
         self.N_break = N_break
@@ -92,15 +94,14 @@ class fastMP:
 
             st_idx = d_idxs[:len(st_idx)]
 
-            # # Filter field stars
-            # msk = self.PMPlxFilter(
-            #     s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
-            #     plx_c)
-            # st_idx = st_idx[msk]
+            # Filter field stars
+            msk = self.PMPlxFilter(
+                s_pmRA[st_idx], s_pmDE[st_idx], s_Plx[st_idx], vpd_c,
+                plx_c)
+            print(len(st_idx), msk.sum())
+            st_idx = st_idx[msk]
 
-            # if not st_idx:
-            if not st_idx.any():
-                continue
+            print(N_clust, len(st_idx))
 
             # Re-estimate centers using the selected stars
             xy_c, vpd_c, plx_c = self.centXYPMPlx(
@@ -113,6 +114,7 @@ class fastMP:
 
         if N_membs:
             N_membs = int(np.median(N_membs))
+        # print(N_membs)
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
@@ -207,14 +209,22 @@ class fastMP:
         pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
 
         # Hard Plx limit
-        plxRad = max(self.hardPlxRad, .5 * plx_c)  # HARDCODED
+        # plxRad = max(self.hardPlxRad, .5 * plx_c)  # HARDCODED
 
-        if firstCall is False:
-            pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
-            pmRad = min(pmRad, pmRad_std)
+        d_pc = 1000 / plx_c
+        plx_min = 1000 / (d_pc + self.hardPcRad)
+        plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
+        # plx_r = max(plx_c - plx_min, plx_max - plx_c)
+        plx_r = .5 * (plx_max - plx_min)
+        plxRad = max(self.hardPlxRad, plx_r)
+        print(plx_min, plx_max, plx_r, plxRad)
 
-            plxRad_std = self.pmsplxSTDDEV * np.std(plx)
-            plxRad = max(self.hardPlxRad, plxRad_std)
+        # if firstCall is False:
+        #     pmRad_std = self.pmsplxSTDDEV * np.std(pms, 0).mean()
+        #     pmRad = min(pmRad, pmRad_std)
+
+        #     plxRad_std = self.pmsplxSTDDEV * np.std(plx)
+        #     plxRad = max(self.hardPlxRad, plxRad_std)
 
         msk = (dist_pm < pmRad) & (dist_plx < plxRad)
 
@@ -297,6 +307,7 @@ class fastMP:
                     d_avrg = np.median(d_sorted[step_old:step])
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
+                    # ld_std = min(abs(ld_avrg - np.percentile(last_dists, (16, 84))))
                     last_dists = 1. * d_sorted[step_old:step]
                 else:
                     # Break condition 2
@@ -304,9 +315,11 @@ class fastMP:
 
             # Break condition 1
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
+                print("d_avrg")
                 break
             # Break condition 2
             if N_break_count == self.N_break:
+                print("N_break")
                 break
 
             step_old = step
