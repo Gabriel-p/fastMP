@@ -86,6 +86,8 @@ class fastMP:
 
         if N_membs:
             N_membs = int(np.median(N_membs))
+        else:
+            N_membs = 0
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
