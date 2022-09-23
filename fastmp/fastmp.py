@@ -9,6 +9,7 @@ from scipy.stats import gaussian_kde
 class fastMP:
 
     def __init__(self,
+                 N_resample=0,
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
@@ -20,6 +21,7 @@ class fastMP:
                  zoom_f=4,
                  N_zoom=10,
                  vpd_c=None):
+        self.N_resample = N_resample
         self.N_membs_min = N_membs_min
         self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
@@ -53,19 +55,24 @@ class fastMP:
         all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
         PMsPlx_data = np.array([pmRA, pmDE, plx]).T
 
-        N_runs, idx_selected, N_membs = 0, [], []
-        for N_clust in range(self.N_membs_min, self.N_membs_max):
+        # Obtain indexes and distances of stars to the center
+        _, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
+            all_data, PMsPlx_data, xy_c, vpd_c, plx_c)
 
-            # Obtain indexes and distances of stars to the center
+        N_membs_d = []
+        for N_clust in range(self.N_membs_min, self.N_membs_max):
+            # Most probable members given their distances
+            N_survived, d_avrg = self.getStars(
+                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+            N_membs_d.append([N_survived, d_avrg])
+        N_membs_d = np.array(N_membs_d).T
+        idx = np.argmin(abs(N_membs_d[1] - np.median(N_membs_d[1])))
+        N_survived = int(N_membs_d[0][idx])
+
+        N_runs, idx_selected = 0, []
+        for _ in range(self.N_resample + 1):
             d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
                 all_data, PMsPlx_data, xy_c, vpd_c, plx_c)
-
-            # Most probable members given their distances
-            N_survived = self.getStars(
-                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
-
-            if N_survived <= 5:  # HARDCODED
-                continue
 
             # Star selection
             st_idx = d_idxs[:N_survived]
@@ -82,16 +89,10 @@ class fastMP:
 
             idx_selected += list(st_idx)
             N_runs += 1
-            N_membs.append(len(st_idx))
-
-        if N_membs:
-            N_membs = int(np.median(N_membs))
-        else:
-            N_membs = 0
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
-        return probs_final, N_membs
+        return probs_final, N_survived
 
     def nanRjct(self, data):
         """
@@ -264,11 +265,10 @@ class fastMP:
         C_thresh = self.C_thresh_N / N_clust
 
         last_dists = [100000]
-        # N_break_count = 0
         ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
         for step in np.arange(N_clust, N_stars, N_clust):
-            msk = d_idxs[step_old:step]
 
+            msk = d_idxs[step_old:step]
             C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
             if not np.isnan(C_s):
                 # Cluster survived
@@ -280,20 +280,14 @@ class fastMP:
                     ld_avrg = np.median(last_dists)
                     ld_std = np.std(last_dists)
                     last_dists = 1. * d_sorted[step_old:step]
-                # else:
-                #     # Break condition 2
-                #     N_break_count += 1
 
             # Break condition
             if d_avrg > ld_avrg + self.N_std_d * ld_std:
                 break
-            # # Break condition 2
-            # if N_break_count == self.N_break:
-            #     break
 
             step_old = step
 
-        return N_survived
+        return N_survived, d_avrg
 
     def rkfunc(self, xy, rads, Kest):
         """
