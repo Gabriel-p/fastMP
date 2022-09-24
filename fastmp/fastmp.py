@@ -9,14 +9,13 @@ from scipy.stats import gaussian_kde
 class fastMP:
 
     def __init__(self,
-                 N_resample=0,
+                 N_resample=100,
                  N_membs_min=25,
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
                  hardPcRad=15,
                  N_std_d=5,
-                 # N_break=20,
                  N_bins=50,
                  zoom_f=4,
                  N_zoom=10,
@@ -41,38 +40,34 @@ class fastMP:
         msk_accpt, X = self.nanRjct(X)
 
         # Unpack input data
-        lon, lat, pmRA, pmDE, plx = X
+        if self.N_resample > 0:
+            lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
+        else:
+            lon, lat, pmRA, pmDE, plx = X
+            e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
 
         # Remove the most obvious field stars to speed up the process
-        msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c =\
-            self.firstFilter(msk_accpt, lon, lat, pmRA, pmDE, plx)
+        msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, e_pmRA,\
+            e_pmDE, e_plx = self.firstFilter(
+                msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
 
+        N_survived = self.NmembsEstimate(
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
+
         # Pack data used below
-        xy = np.array([lon, lat]).T
-        all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
-        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
-
-        # Obtain indexes and distances of stars to the center
-        _, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
-            all_data, PMsPlx_data, xy_c, vpd_c, plx_c)
-
-        N_membs_d = []
-        for N_clust in range(self.N_membs_min, self.N_membs_max):
-            # Most probable members given their distances
-            N_survived, d_avrg = self.getStars(
-                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
-            N_membs_d.append([N_survived, d_avrg])
-        N_membs_d = np.array(N_membs_d).T
-        idx = np.argmin(abs(N_membs_d[1] - np.median(N_membs_d[1])))
-        N_survived = int(N_membs_d[0][idx])
+        data_err = np.array([e_pmRA, e_pmDE, e_plx])
 
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
-            d_idxs, d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
-                all_data, PMsPlx_data, xy_c, vpd_c, plx_c)
+
+            # Sample data (if requested)
+            s_pmRA, s_pmDE, s_plx = self.dataSample(pmRA, pmDE, plx, data_err)
+
+            all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+            d_idxs = self.getDists(xy_c, vpd_c, plx_c, all_data=all_data)
 
             # Star selection
             st_idx = d_idxs[:N_survived]
@@ -108,7 +103,8 @@ class fastMP:
 
         return msk_accpt, data.T[msk_accpt].T
 
-    def firstFilter(self, msk_accpt, lon, lat, pmRA, pmDE, plx):
+    def firstFilter(
+            self, msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
         """
         """
         # Estimate initial center
@@ -119,6 +115,8 @@ class fastMP:
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
+        if self.N_resample > 0:
+            e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
 
         # Update mask of accepted elements
         N_accpt = len(msk_accpt)
@@ -127,7 +125,8 @@ class fastMP:
         msk_accpt = np.full(N_accpt, False)
         msk_accpt[idxs] = True
 
-        return msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c
+        return msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,\
+            e_pmRA, e_pmDE, e_plx
 
     def centXYPMPlx(self, lon, lat, pmRA, pmDE, Plx):
         """
@@ -235,15 +234,52 @@ class fastMP:
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def getDists(self, all_data, PMsPlx_data, xy_c, vpd_c, plx_c):
+    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
+        """
+        """
+        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
+        # Obtain indexes and distances of stars to the center
+        d_pm_plx_idxs, d_pm_plx_sorted = self.getDists(
+            xy_c, vpd_c, plx_c, PMsPlx_data=PMsPlx_data, usexy=False)
+
+        xy = np.array([lon, lat]).T
+        N_membs_d = []
+        for N_clust in range(self.N_membs_min, self.N_membs_max):
+            # Most probable members given their distances
+            N_survived, d_avrg = self.getStars(
+                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
+            N_membs_d.append([N_survived, d_avrg])
+
+        N_membs_d = np.array(N_membs_d).T
+        idx = np.argmin(abs(N_membs_d[1] - np.median(N_membs_d[1])))
+        N_survived = int(N_membs_d[0][idx])
+
+        return N_survived
+
+    def dataSample(self, pmRA, pmDE, plx, data_err):
+        """
+        Gaussian random sample
+        """
+        if self.N_resample == 0:
+            return pmRA, pmDE, plx
+
+        data_3 = np.array([pmRA, pmDE, plx])
+        grs = np.random.normal(0., 1., data_3.shape[1])
+        return data_3 + grs * data_err
+
+    def getDists(
+        self, xy_c, vpd_c, plx_c, all_data=None, PMsPlx_data=None,
+            usexy=True):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
         """
-        # Sort distances using XY+PMs+Plx
-        all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
-        all_dist = cdist(all_data, all_c).T[0]
-        d_idxs = all_dist.argsort()
+        if usexy:
+            # Sort distances using XY+PMs+Plx
+            all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
+            all_dist = cdist(all_data, all_c).T[0]
+            d_idxs = all_dist.argsort()
+            return d_idxs
 
         # Sort distances using only PMs+Plx
         all_c = np.array([list(vpd_c) + [plx_c]])
@@ -251,7 +287,7 @@ class fastMP:
         d_pm_plx_idxs = dist_sum.argsort()
         d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
 
-        return d_idxs, d_pm_plx_idxs, d_pm_plx_sorted
+        return d_pm_plx_idxs, d_pm_plx_sorted
 
     def getStars(self, xy, d_idxs, d_sorted, N_clust):
         """
