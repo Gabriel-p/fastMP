@@ -58,10 +58,9 @@ class fastMP:
         N_survived = self.NmembsEstimate(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
 
+        xy_c_old, vpd_c_old, plx_c_old = [xy_c], [vpd_c], [plx_c]
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
-
-            print(xy_c, vpd_c, plx_c)
 
             # Sample data (if requested)
             s_pmRA, s_pmDE, s_plx = self.dataSample(
@@ -83,6 +82,12 @@ class fastMP:
             xy_c, vpd_c, plx_c = self.get_5D_center(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx])
+
+            xy_c_old.append(xy_c)
+            vpd_c_old.append(vpd_c)
+            plx_c_old.append(plx_c)
+            xy_c, vpd_c, plx_c = list(np.median(xy_c_old, 0)),\
+                list(np.median(vpd_c_old, 0)), np.median(plx_c_old)
 
             idx_selected += list(st_idx)
             N_runs += 1
@@ -175,11 +180,11 @@ class fastMP:
         # AB3
         elif self.xy_c is not None and self.plx_c is None:
             dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (plx - self.xy_c[0])**2 + + (plx - self.xy_c[1])**2
+                + (lon - self.xy_c[0])**2 + (lat - self.xy_c[1])**2
         # AB4
         elif self.xy_c is not None and self.plx_c is not None:
             dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (plx - self.xy_c[0])**2 + + (plx - self.xy_c[1])**2\
+                + (lon - self.xy_c[0])**2 + (lat - self.xy_c[1])**2\
                 + (plx - self.plx_c)**2
 
         # Closest stars to the selected center
@@ -339,7 +344,7 @@ class fastMP:
         smallest value.
         """
         all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
-        all_c = np.array([xy_c + list(vpd_c) + [plx_c]])
+        all_c = np.array([xy_c + vpd_c + [plx_c]])
         all_dist = cdist(all_data, all_c).T[0]
         d_idxs = all_dist.argsort()
         return d_idxs
