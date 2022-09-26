@@ -16,9 +16,7 @@ class fastMP:
                  hardPlxRad=0.2,
                  hardPcRad=15,
                  N_std_d=5,
-                 N_bins=50,
-                 zoom_f=4,
-                 N_zoom=10,
+                 xy_c=None,
                  vpd_c=None,
                  plx_c=None,
                  fixed_centers=False):
@@ -29,10 +27,7 @@ class fastMP:
         self.hardPlxRad = hardPlxRad
         self.hardPcRad = hardPcRad
         self.N_std_d = N_std_d
-        # self.N_break = N_break
-        self.N_bins = N_bins
-        self.zoom_f = zoom_f
-        self.N_zoom = N_zoom
+        self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
         self.fixed_centers = fixed_centers
@@ -85,7 +80,7 @@ class fastMP:
             st_idx = st_idx[msk]
 
             # Re-estimate centers using the selected stars
-            xy_c, vpd_c, plx_c = self.centXYPMPlx(
+            xy_c, vpd_c, plx_c = self.get_5D_center(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx])
 
@@ -115,7 +110,7 @@ class fastMP:
         """
         """
         # Estimate initial center
-        xy_c, vpd_c, plx_c = self.centXYPMPlx(lon, lat, pmRA, pmDE, plx)
+        xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
 
         # Remove obvious field stars
         msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c)
@@ -135,89 +130,121 @@ class fastMP:
         return msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,\
             e_pmRA, e_pmDE, e_plx
 
-    def centXYPMPlx(self, lon, lat, pmRA, pmDE, Plx, M=4):
+    def get_5D_center(self, lon, lat, pmRA, pmDE, plx, M=4):
         """
-        Estimate the center of the cluster. If this function
-        fails, everything else will fail too.
+        Estimate the 5-dimensional center of the cluster.
+
+        Possible scenarios:
+
+        A. vpd_c=None
+          1. Estimate vpd_c
+        B. vpd_c!=None
+          1. Use manual vpd_c
+
+        AB1. xy_c=None, plx_c=None
+          2. Obtain indexes of closest distances to vpd_c center
+        AB2. xy_c=None, plx_c!=None
+          2. Obtain indexes of closest distances to vpd_c+plx_c center
+        AB3. xy_c!=None, plx_c=None
+          2. Obtain indexes of closest distances to vpd_c+xy_c center
+        AB4. xy_c!=None, plx_c!=None
+          2. Obtain indexes of closest distances to vpd_c+plx_c+xy_c center
+
+        3. Estimate 5D center with KDE
 
         M: multiplier factor that determines how many N_membs are used to
         estimate the xy+Plx center.
 
         """
-        vpd_mc = self.vpd_c
-        plx_mc = self.plx_c
+        if self.fixed_centers is True:
+            return self.xy_c, self.vpd_c, self.plx_c
 
+        if self.vpd_c is None:
+            vpd_c = self.get_pms_center(pmRA, pmDE)
+        else:
+            vpd_c = self.vpd_c
+
+        # Distances to center
+        # AB1
+        if self.xy_c is None and self.plx_c is None:
+            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
+        # AB2
+        elif self.xy_c is None and self.plx_c is not None:
+            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
+                + (plx - self.plx_c)**2
+        # AB3
+        elif self.xy_c is not None and self.plx_c is None:
+            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
+                + (plx - self.xy_c[0])**2 + + (plx - self.xy_c[1])**2
+        # AB4
+        elif self.xy_c is not None and self.plx_c is not None:
+            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
+                + (plx - self.xy_c[0])**2 + + (plx - self.xy_c[1])**2\
+                + (plx - self.plx_c)**2
+
+        # Closest stars to the selected center
+        idx = dist.argsort()[:M * self.N_membs_min]  # HARDCODED
+
+        # Estimate 5D center with KDE
+        d1, d2, d3, d4, d5 = lon[idx], lat[idx], pmRA[idx], pmDE[idx], plx[idx]
+        d1_5 = np.vstack([d1, d2, d3, d4, d5])
+        # Define Gaussian KDE
+        kde = gaussian_kde(d1_5)
+        # Evaluate in the selected closest stars to the center
+        density = kde(d1_5)
+        # Extract new centers as those associated to the maximum density
+        x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
+
+        # print(x_c, y_c, pmra_c, pmde_c, plx_c)
+        # import matplotlib.pyplot as plt
+        # plt.subplot(131)
+        # plt.scatter(lon[idx], lat[idx])
+        # plt.subplot(132)
+        # plt.scatter(pmRA[idx], pmDE[idx])
+        # plt.subplot(133)
+        # plt.hist(plx[idx])
+        # plt.show()
+        # breakpoint()
+
+        return [x_c, y_c], [pmra_c, pmde_c], plx_c
+
+    def get_pms_center(self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10):
+        """
+        """
         vpd = np.array([pmRA, pmDE]).T
-
         # Center in PMs space
-        for _ in range(self.N_zoom):
+        for _ in range(N_zoom):
             N_stars = vpd.shape[0]
             if N_stars < 5:  # HARDCODED
                 break
 
             # Find center coordinates as max density
             x, y = vpd.T
-            H, edgx, edgy = np.histogram2d(x, y, bins=self.N_bins)
+            H, edgx, edgy = np.histogram2d(x, y, bins=N_bins)
             flat_idx = H.argmax()
             cbx, cby = np.unravel_index(flat_idx, H.shape)
             cx = (edgx[cbx + 1] + edgx[cbx]) / 2.
             cy = (edgy[cby + 1] + edgy[cby]) / 2.
 
-            # If a manual center was set, use it
-            if vpd_mc is not None:
-                # Store the auto center for later
-                cxm, cym = cx, cy
-                # Use the manual to zoom in
-                cx, cy = vpd_mc
+            # # If a manual center was set, use it
+            # if vpd_mc is not None:
+            #     # Store the auto center for later
+            #     cxm, cym = cx, cy
+            #     # Use the manual to zoom in
+            #     cx, cy = vpd_mc
 
             # Zoom in
             rx, ry = edgx[1] - edgx[0], edgy[1] - edgy[0]
-            msk = (x < (cx + self.zoom_f * rx))\
-                & (x > (cx - self.zoom_f * rx))\
-                & (y < (cy + self.zoom_f * ry))\
-                & (y > (cy - self.zoom_f * ry))
+            msk = (x < (cx + zoom_f * rx))\
+                & (x > (cx - zoom_f * rx))\
+                & (y < (cy + zoom_f * ry))\
+                & (y > (cy - zoom_f * ry))
             vpd = vpd[msk]
 
-        if vpd_mc is not None:
-            cx, cy = cxm, cym
-        vpd_c = (cx, cy)
-
-        # XY and Plx centers
-        if plx_mc is None:
-            # Distance to VPD center
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
-            # Closest stars to PMs center
-            idx = dist.argsort()[:M * self.N_membs_min]  # HARDCODED
-        else:
-            # Distance to VPD+Plx center
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (Plx - plx_mc)**2
-            # Closest stars to PMs+Plx center
-            idx = dist.argsort()[:M * self.N_membs_min]  # HARDCODED
-
-        x, y, z = lon[idx], lat[idx], Plx[idx]
-        xyz = np.vstack([x, y, z])
-        kde = gaussian_kde(xyz)
-        density = kde(xyz)
-        c1, c2, plx_c = xyz[:, density.argmax()]
-        xy_c = [c1, c2]
-
-        # print(xy_c, vpd_c, plx_c)
-        # import matplotlib.pyplot as plt
-        # plt.subplot(131)
-        # plt.scatter(x, y)
-        # plt.subplot(132)
-        # plt.scatter(pmRA[idx], pmDE[idx])
-        # plt.subplot(133)
-        # plt.hist(z)
-        # plt.show()
-        # breakpoint()
-
-        return xy_c, vpd_c, plx_c
-
-    def get_pms_center():
-        """
-        """
+        # if vpd_mc is not None:
+        #     cx, cy = cxm, cym
+        # vpd_c = (cx, cy)
+        return (cx, cy)
 
     def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
