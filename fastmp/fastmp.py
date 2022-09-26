@@ -58,7 +58,6 @@ class fastMP:
         N_survived = self.NmembsEstimate(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
 
-        xy_c_old, vpd_c_old, plx_c_old = [xy_c], [vpd_c], [plx_c]
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
@@ -82,12 +81,6 @@ class fastMP:
             xy_c, vpd_c, plx_c = self.get_5D_center(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx])
-
-            xy_c_old.append(xy_c)
-            vpd_c_old.append(vpd_c)
-            plx_c_old.append(plx_c)
-            xy_c, vpd_c, plx_c = list(np.median(xy_c_old, 0)),\
-                list(np.median(vpd_c_old, 0)), np.median(plx_c_old)
 
             idx_selected += list(st_idx)
             N_runs += 1
@@ -200,22 +193,23 @@ class fastMP:
         # Extract new centers as those associated to the maximum density
         x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
 
-        # print(x_c, y_c, pmra_c, pmde_c, plx_c)
-        # import matplotlib.pyplot as plt
-        # plt.subplot(131)
-        # plt.scatter(lon[idx], lat[idx])
-        # plt.subplot(132)
-        # plt.scatter(pmRA[idx], pmDE[idx])
-        # plt.subplot(133)
-        # plt.hist(plx[idx])
-        # plt.show()
-        # breakpoint()
+        # # Estimate 5D center with KDE
+        # d1, d2, d5 = lon[idx], lat[idx], plx[idx]
+        # d1_5 = np.vstack([d1, d2, d5])
+        # # Define Gaussian KDE
+        # kde = gaussian_kde(d1_5)
+        # # Evaluate in the selected closest stars to the center
+        # density = kde(d1_5)
+        # # Extract new centers as those associated to the maximum density
+        # x_c, y_c, plx_c = d1_5[:, density.argmax()]
 
-        return [x_c, y_c], [pmra_c, pmde_c], plx_c
+        return [x_c, y_c], list(vpd_c), plx_c
 
     def get_pms_center(self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10):
         """
         """
+        # vpd_mc = self.vpd_c
+
         vpd = np.array([pmRA, pmDE]).T
         # Center in PMs space
         for _ in range(N_zoom):
@@ -248,7 +242,7 @@ class fastMP:
 
         # if vpd_mc is not None:
         #     cx, cy = cxm, cym
-        # vpd_c = (cx, cy)
+
         return (cx, cy)
 
     def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
@@ -320,11 +314,26 @@ class fastMP:
 
         # The final value is obtained as the one associated to the median
         # distance where the break happens, also called 'threshold'
-        thresh_med = np.median(N_membs_d[1])
-        idx = np.argmin(abs(N_membs_d[1] - thresh_med))
-        N_survived = int(N_membs_d[0][idx])
+
+        # thresh_med = np.median(N_membs_d[1])
+        # idx = np.argmin(abs(N_membs_d[1] - thresh_med))
+        # N_survived = int(N_membs_d[0][idx])
+
+        from scipy import interpolate
+        thresh_mode = self.mode_kde(N_membs_d[1])
+        func = interpolate.interp1d(N_membs_d[1], N_membs_d[0])
+        N_survived = int(func(thresh_mode))
 
         return N_survived
+
+    def mode_kde(self, data):
+        """
+        """
+        kernel_cl = gaussian_kde(data)
+        x_kde = np.linspace(data.min(), data.max(), 500)
+        kde = np.reshape(kernel_cl(x_kde).T, x_kde.shape)
+        mode = x_kde[np.argmax(kde)]
+        return mode
 
     def dataSample(self, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
         """
