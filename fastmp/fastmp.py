@@ -15,7 +15,7 @@ class fastMP:
                  hardPMRad=3,
                  hardPlxRad=0.2,
                  hardPcRad=15,
-                 N_std_d=5,
+                 N_std_d=50,
                  xy_c=None,
                  vpd_c=None,
                  plx_c=None,
@@ -56,17 +56,18 @@ class fastMP:
 
         # Estimate the number of members
         N_survived = self.NmembsEstimate(
-            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
+        xy_c_all, vpd_c_all, plx_c_all = [], [], []
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
             # Sample data (if requested)
-            s_pmRA, s_pmDE, s_plx = self.dataSample(
+            s_pmRA, s_pmDE, s_plx = self.data_sample(
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
             # Indexes of the sorted 5D distances 5D to the estimated center
-            d_idxs = self.getDists(
+            d_idxs = self.get_5d_dists(
                 xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
 
             # Star selection
@@ -81,6 +82,13 @@ class fastMP:
             xy_c, vpd_c, plx_c = self.get_5D_center(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx])
+            #
+            # xy_c_all.append(xy_c)
+            # vpd_c_all.append(vpd_c)
+            # plx_c_all.append(plx_c)
+            # xy_c = list(np.median(xy_c_all, 0))
+            # vpd_c = list(np.median(vpd_c_all, 0))
+            # plx_c = np.median(plx_c_all)
 
             idx_selected += list(st_idx)
             N_runs += 1
@@ -154,13 +162,8 @@ class fastMP:
         estimate the xy+Plx center.
 
         """
-        if self.fixed_centers is True:
-            return self.xy_c, self.vpd_c, self.plx_c
-
-        if self.vpd_c is None:
-            vpd_c = self.get_pms_center(pmRA, pmDE)
-        else:
-            vpd_c = self.vpd_c
+        # (Re)estimate VPD center
+        vpd_c = self.get_pms_center(pmRA, pmDE)
 
         # Distances to center
         # AB1
@@ -192,8 +195,9 @@ class fastMP:
         density = kde(d1_5)
         # Extract new centers as those associated to the maximum density
         x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
+        vpd_c = (pmra_c, pmde_c)
 
-        # # Estimate 5D center with KDE
+        # # Estimate 3D center with KDE
         # d1, d2, d5 = lon[idx], lat[idx], plx[idx]
         # d1_5 = np.vstack([d1, d2, d5])
         # # Define Gaussian KDE
@@ -203,12 +207,20 @@ class fastMP:
         # # Extract new centers as those associated to the maximum density
         # x_c, y_c, plx_c = d1_5[:, density.argmax()]
 
+        if self.fixed_centers is True:
+            if self.xy_c is not None:
+                [x_c, y_c] = self.xy_c
+            if self.vpd_c is not None:
+                vpd_c = self.vpd_c
+            if self.plx_c is not None:
+                plx_c = self.plx_c
+
         return [x_c, y_c], list(vpd_c), plx_c
 
     def get_pms_center(self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10):
         """
         """
-        # vpd_mc = self.vpd_c
+        vpd_mc = self.vpd_c
 
         vpd = np.array([pmRA, pmDE]).T
         # Center in PMs space
@@ -225,12 +237,12 @@ class fastMP:
             cx = (edgx[cbx + 1] + edgx[cbx]) / 2.
             cy = (edgy[cby + 1] + edgy[cby]) / 2.
 
-            # # If a manual center was set, use it
-            # if vpd_mc is not None:
-            #     # Store the auto center for later
-            #     cxm, cym = cx, cy
-            #     # Use the manual to zoom in
-            #     cx, cy = vpd_mc
+            # If a manual center was set, use it
+            if vpd_mc is not None:
+                # Store the auto center for later
+                cxm, cym = cx, cy
+                # Use the manual to zoom in
+                cx, cy = vpd_mc
 
             # Zoom in
             rx, ry = edgx[1] - edgx[0], edgy[1] - edgy[0]
@@ -240,8 +252,8 @@ class fastMP:
                 & (y > (cy - zoom_f * ry))
             vpd = vpd[msk]
 
-        # if vpd_mc is not None:
-        #     cx, cy = cxm, cym
+        if vpd_mc is not None:
+            cx, cy = cxm, cym
 
         return (cx, cy)
 
@@ -251,7 +263,6 @@ class fastMP:
         """
         pms = np.array([pmRA, pmDE]).T
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
-        # dist_plx = abs(plx_c - plx)
 
         # Hard PMs limit
         pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
@@ -280,62 +291,56 @@ class fastMP:
         area = (xmax - xmin) * (ymax - ymin)
         Kest = RipleysKEstimator(
             area=area, x_max=xmax, y_max=ymax, x_min=xmin, y_min=ymin)
-        lmin = min((xmax - xmin), (ymax - ymin))
-        rads = np.linspace(lmin * 0.01, lmin * .25, 10)  # HARDCODED
 
-        area = (xmax - xmin) * (ymax - ymin)
+        # Ripley's rule of thumb
+        thumb = 0.25 * min((xmax - xmin), (ymax - ymin))
+        # Large sample rule
+        rho = len(lon) / area
+        large = np.sqrt(1000 / (np.pi * rho))
+
+        lmin = min(thumb, large)
+        rads = np.linspace(lmin * 0.01, lmin, 100)  # HARDCODED
+
         C_thresh_N = 1.68 * np.sqrt(area)  # HARDCODED
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
+    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
         """
         Estimate the number of cluster members
         """
-        # Obtain indexes and distances of stars to the PMs+Plx center
-        # Center in PMs+Plx
-        all_c = np.array([list(vpd_c) + [plx_c]])
-        # Distances to this center
-        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
-        dist_sum = cdist(PMsPlx_data, all_c).T[0]
-        # Indexes that sort the distances
-        d_pm_plx_idxs = dist_sum.argsort()
-        # Sorted distances
-        d_pm_plx_sorted = dist_sum[d_pm_plx_idxs]
+        d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted = self.get_3d_dists(
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
         xy = np.array([lon, lat]).T
-        N_membs_d = []
-        for N_clust in range(self.N_membs_min, self.N_membs_max):
-            # Most probable members given their distances
-            N_survived, d_avrg = self.getStars(
-                xy, d_pm_plx_idxs, d_pm_plx_sorted, N_clust)
-            N_membs_d.append([N_survived, d_avrg])
-        N_membs_d = np.array(N_membs_d).T
+        # N_membs_d = []
+        # for N_clust in range(self.N_membs_min, self.N_membs_max):
+        #     # Most probable members given their distances
+        #     N_survived, d_avrg = self.get_stars(
+        #         xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
+        #     N_membs_d.append([N_survived, d_avrg])
+        # N_membs_d = np.array(N_membs_d).T
 
-        # The final value is obtained as the one associated to the median
-        # distance where the break happens, also called 'threshold'
-
+        # # The final value is obtained as the one associated to the median
+        # # distance where the break happens, also called 'threshold'
         # thresh_med = np.median(N_membs_d[1])
         # idx = np.argmin(abs(N_membs_d[1] - thresh_med))
         # N_survived = int(N_membs_d[0][idx])
 
-        from scipy import interpolate
-        thresh_mode = self.mode_kde(N_membs_d[1])
-        func = interpolate.interp1d(N_membs_d[1], N_membs_d[0])
-        N_survived = int(func(thresh_mode))
+        # N_survived = self.get_stars(
+        #     xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
+
+        N_membs_d = []
+        for N_clust in range(self.N_membs_min, self.N_membs_max):
+            # Most probable members given their distances
+            N_survived = self.get_stars(
+                xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
+            N_membs_d.append(N_survived)
+        N_survived = int(np.median(N_membs_d))
 
         return N_survived
 
-    def mode_kde(self, data):
-        """
-        """
-        kernel_cl = gaussian_kde(data)
-        x_kde = np.linspace(data.min(), data.max(), 500)
-        kde = np.reshape(kernel_cl(x_kde).T, x_kde.shape)
-        mode = x_kde[np.argmax(kde)]
-        return mode
-
-    def dataSample(self, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
+    def data_sample(self, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
         """
         Gaussian random sample
         """
@@ -347,7 +352,27 @@ class fastMP:
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
 
-    def getDists(self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx):
+    def get_3d_dists(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
+        """
+        Obtain indexes and distances of stars to the PMs+Plx center
+        """
+        all_c = np.array([list(vpd_c) + [plx_c]])
+        # Distances to this center
+        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
+        dist_3d = cdist(PMsPlx_data, all_c).T[0]
+        # Indexes that sort the distances
+        d_pm_plx_idxs = dist_3d.argsort()
+        # Sorted distances
+        d_pm_plx_sorted = dist_3d[d_pm_plx_idxs]
+
+        # Distances to this center
+        dist_xy = cdist(np.array([lon, lat]).T, np.array([xy_c])).T[0]
+        d_xy_sorted = dist_xy[d_pm_plx_idxs]
+
+        return d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted
+
+    def get_5d_dists(
+            self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
@@ -356,9 +381,10 @@ class fastMP:
         all_c = np.array([xy_c + vpd_c + [plx_c]])
         all_dist = cdist(all_data, all_c).T[0]
         d_idxs = all_dist.argsort()
+
         return d_idxs
 
-    def getStars(self, xy, d_idxs, d_sorted, N_clust):
+    def get_stars(self, xy, d_idxs, d_sorted, d_xy_sorted, N_clust):
         """
         """
         N_stars = xy.shape[0]
@@ -369,30 +395,58 @@ class fastMP:
 
         C_thresh = self.C_thresh_N / N_clust
 
-        last_dists = [100000]
-        ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        # temp_accpt, temp_rjct = [], []
+
+        # last_dists = [100000]
+        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        N_break = 0
+
         for step in np.arange(N_clust, N_stars, N_clust):
 
             msk = d_idxs[step_old:step]
+
+            # d_step_range = d_sorted[step_old:step]
+            # d_step_range_xy = d_xy_sorted[step_old:step]
+
             C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
                     N_survived += N_clust
 
-                    # Break condition
-                    d_avrg = np.median(d_sorted[step_old:step])
-                    ld_avrg = np.median(last_dists)
-                    ld_std = np.std(last_dists)
-                    last_dists = 1. * d_sorted[step_old:step]
+                    # # Break condition
+                    # d_avrg = np.median(d_step_range)
+                    # ld_avrg = np.median(last_dists)
+                    # ld_std = np.std(last_dists)
+                    # last_dists = 1. * d_step_range
+
+                    # if step_old != 0:
+                    #     temp_accpt.append([step, C_s, np.std(d_step_range_xy)])
+                else:
+                    # temp_rjct.append([step, C_s, np.std(d_step_range_xy)])
+                    N_break += 1
 
             # Break condition
-            if d_avrg > ld_avrg + self.N_std_d * ld_std:
+            # if d_avrg > ld_avrg + self.N_std_d * ld_std:
+            #     break
+            if N_break > 10:
                 break
 
             step_old = step
 
-        return N_survived, d_avrg
+        # import matplotlib.pyplot as plt
+        # temp_accpt = np.array(temp_accpt).T
+        # temp_rjct = np.array(temp_rjct).T
+        # plt.subplot(121)
+        # plt.title(f"{N_clust}, {N_survived}")
+        # plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
+        # plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
+        # plt.subplot(122)
+        # plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
+        # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
+        # plt.show()
+
+        return N_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
@@ -425,7 +479,7 @@ class fastMP:
             warnings.simplefilter("ignore")
             L_t = Kest.Lfunction(xy, rads, mode='translation')
 
-        # Catch all-nans
+        # Catch all-nans. Avoid 'RuntimeWarning: All-NaN slice encountered'
         if np.isnan(L_t).all():
             C_s = np.nan
         else:
@@ -455,92 +509,3 @@ class fastMP:
         probs_final[msk_accpt] = probs_all
 
         return probs_final
-
-
-# class RipleysKEstimator:
-#     """
-#     """
-
-#     def __init__(self, area, x_max=None, y_max=None, x_min=None, y_min=None):
-#         self.area = area
-#         self.x_max = x_max
-#         self.y_max = y_max
-#         self.x_min = x_min
-#         self.y_min = y_min
-
-#     @property
-#     def area(self):
-#         return self._area
-
-#     @area.setter
-#     def area(self, value):
-#         self._area = value
-
-#     @property
-#     def y_max(self):
-#         return self._y_max
-
-#     @y_max.setter
-#     def y_max(self, value):
-#         self._y_max = value
-
-#     @property
-#     def x_max(self):
-#         return self._x_max
-
-#     @x_max.setter
-#     def x_max(self, value):
-#         self._x_max = value
-
-#     @property
-#     def y_min(self):
-#         return self._y_min
-
-#     @y_min.setter
-#     def y_min(self, value):
-#         self._y_min = value
-
-#     @property
-#     def x_min(self):
-#         return self._x_min
-
-#     @x_min.setter
-#     def x_min(self, value):
-#         self._x_min = value
-
-#     def __call__(self, data, radii, mode='none'):
-#         return self.evaluate(data=data, radii=radii, mode=mode)
-
-#     def Lfunction(self, data, radii, mode='none'):
-#         """
-#         Evaluates the L function at ``radii``. For parameter description
-#         see ``evaluate`` method.
-#         """
-#         return np.sqrt(self.evaluate(data, radii, mode=mode) / np.pi)
-
-#     def evaluate(self, data, radii, mode='none'):
-#         """
-#         """
-
-#         data = np.asarray(data)
-#         npts = len(data)
-
-#         diff = np.zeros(shape=(npts * (npts - 1) // 2, 2), dtype=np.double)
-#         k = 0
-#         for i in range(npts - 1):
-#             size = npts - i - 1
-#             diff[k:k + size] = abs(data[i] - data[i + 1:])
-#             k += size
-
-#         distances = np.hypot(diff[:, 0], diff[:, 1])
-#         intersec_area = (((self.x_max - self.x_min) - diff[:, 0])
-#                          * ((self.y_max - self.y_min) - diff[:, 1]))
-
-#         ripley = np.zeros(len(radii))
-#         for r in range(len(radii)):
-#             dist_indicator = distances < radii[r]
-#             ripley[r] = ((1 / intersec_area) * dist_indicator).sum()
-
-#         ripley = (self.area**2 / (npts * (npts - 1))) * 2 * ripley
-
-#         return ripley
