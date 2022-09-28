@@ -314,23 +314,20 @@ class fastMP:
 
         xy = np.array([lon, lat]).T
 
-        # N_survived = self.get_stars(
-        #     xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
-
         N_stars = xy.shape[0]
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        N_survived, step_old = 0, 0
+        N_survived, step_old, idx_survived = 0, 0, []
 
         N_clust = self.N_membs_min
         C_thresh = self.C_thresh_N / N_clust
 
-        temp_accpt, temp_rjct, C_s_old = [], [], 1
-
         # last_dists = [100000]
         # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
         N_break = 0
+
+        temp_accpt, temp_rjct, C_s_max = [], [], 0
 
         for step in np.arange(N_clust, N_stars, N_clust):
 
@@ -340,47 +337,54 @@ class fastMP:
             # d_step_range_xy = d_xy_sorted[step_old:step]
 
             C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+
+            C_s_max = max(C_s_max, C_s)
+
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
 
-                    # Outlier filter
-                    N_clust_msk = (abs(d_xy_sorted[msk]-d_xy_sorted[msk].mean()) < 3*d_xy_sorted[msk].std()).sum()
+                    N_survived += N_clust
+                    idx_survived += list(msk)
 
-                    N_survived += N_clust_msk
-
-                    # # Break condition
-                    # d_avrg = np.median(d_step_range)
-                    # ld_avrg = np.median(last_dists)
-                    # ld_std = np.std(last_dists)
-                    # last_dists = 1. * d_step_range
-
-                    if step_old != 0:
-                        temp_accpt.append([step, C_s, C_s/C_s_old])
+                    # if step_old != 0:
+                    #     temp_accpt.append([step, C_s, C_s/C_s_max])
                 else:
-                    temp_rjct.append([step, C_s, C_s/C_s_old])
+                    # temp_rjct.append([step, C_s, C_s/C_s_max])
+                    # Break condition
                     N_break += 1
-
-                C_s_old = C_s
 
             if N_break > 10:
                 break
 
             step_old = step
 
-        import matplotlib.pyplot as plt
-        temp_accpt = np.array(temp_accpt).T
-        temp_rjct = np.array(temp_rjct).T
-        plt.subplot(121)
-        plt.title(f"{N_clust}, {N_survived}")
-        plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
-        plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
-        plt.subplot(122)
-        plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
-        plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
-        plt.show()
+        # N_rand_rjct = 0
+        # for _ in range(1000):
+        #     idx_r = np.random.choice(idx_survived, N_clust, replace=False)
+        #     C_s = self.rkfunc(xy[idx_r], self.rads, self.Kest)
+        #     if np.isnan(C_s) or C_s < C_thresh:
+        #         N_rand_rjct += 1
+        # print(N_rand_rjct/100)
+        # N_survived -= N_survived * N_rand_rjct/1000
+        # N_survived = int(N_survived)
 
-        N_survived = max(N_survived, 10)
+        # import matplotlib.pyplot as plt
+        # temp_accpt = np.array(temp_accpt).T
+        # temp_rjct = np.array(temp_rjct).T
+        # plt.subplot(121)
+        # plt.title(f"{N_clust}, {N_survived}")
+        # plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
+        # plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
+        # plt.subplot(122)
+        # plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
+        # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
+        # plt.show()
+
+        if N_survived < 10:
+            warnings.warn(
+                "The estimated number of cluster members is <10", UserWarning)
+            N_survived = 10
 
         return N_survived
 
