@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, sigmaclip
 
 
 class fastMP:
@@ -58,7 +58,7 @@ class fastMP:
         N_survived = self.NmembsEstimate(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        xy_c_all, vpd_c_all, plx_c_all = [], [], []
+        # xy_c_all, vpd_c_all, plx_c_all = [], [], []
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
@@ -313,31 +313,74 @@ class fastMP:
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
         xy = np.array([lon, lat]).T
-        # N_membs_d = []
-        # for N_clust in range(self.N_membs_min, self.N_membs_max):
-        #     # Most probable members given their distances
-        #     N_survived, d_avrg = self.get_stars(
-        #         xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
-        #     N_membs_d.append([N_survived, d_avrg])
-        # N_membs_d = np.array(N_membs_d).T
 
-        # # The final value is obtained as the one associated to the median
-        # # distance where the break happens, also called 'threshold'
-        # thresh_med = np.median(N_membs_d[1])
-        # idx = np.argmin(abs(N_membs_d[1] - thresh_med))
-        # N_survived = int(N_membs_d[0][idx])
+        # N_survived = self.get_stars(
+        #     xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
 
-        N_survived = self.get_stars(
-            xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
+        N_stars = xy.shape[0]
+
+        # Select those clusters where the stars are different enough from a
+        # random distribution
+        N_survived, step_old = 0, 0
+
+        N_clust = self.N_membs_min
+        C_thresh = self.C_thresh_N / N_clust
+
+        temp_accpt, temp_rjct, C_s_old = [], [], 1
+
+        # last_dists = [100000]
+        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        N_break = 0
+
+        for step in np.arange(N_clust, N_stars, N_clust):
+
+            msk = d_pm_plx_idxs[step_old:step]
+
+            # d_step_range = d_sorted[step_old:step]
+            # d_step_range_xy = d_xy_sorted[step_old:step]
+
+            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+            if not np.isnan(C_s):
+                # Cluster survived
+                if C_s >= C_thresh:
+
+                    # Outlier filter
+                    N_clust_msk = (abs(d_xy_sorted[msk]-d_xy_sorted[msk].mean()) < 3*d_xy_sorted[msk].std()).sum()
+
+                    N_survived += N_clust_msk
+
+                    # # Break condition
+                    # d_avrg = np.median(d_step_range)
+                    # ld_avrg = np.median(last_dists)
+                    # ld_std = np.std(last_dists)
+                    # last_dists = 1. * d_step_range
+
+                    if step_old != 0:
+                        temp_accpt.append([step, C_s, C_s/C_s_old])
+                else:
+                    temp_rjct.append([step, C_s, C_s/C_s_old])
+                    N_break += 1
+
+                C_s_old = C_s
+
+            if N_break > 10:
+                break
+
+            step_old = step
+
+        import matplotlib.pyplot as plt
+        temp_accpt = np.array(temp_accpt).T
+        temp_rjct = np.array(temp_rjct).T
+        plt.subplot(121)
+        plt.title(f"{N_clust}, {N_survived}")
+        plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
+        plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
+        plt.subplot(122)
+        plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
+        plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
+        plt.show()
+
         N_survived = max(N_survived, 10)
-
-        # N_membs_d = []
-        # for N_clust in range(self.N_membs_min, self.N_membs_max):
-        #     # Most probable members given their distances
-        #     N_survived = self.get_stars(
-        #         xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
-        #     N_membs_d.append(N_survived)
-        # N_survived = int(np.median(N_membs_d))
 
         return N_survived
 
@@ -384,70 +427,6 @@ class fastMP:
         d_idxs = all_dist.argsort()
 
         return d_idxs
-
-    def get_stars(self, xy, d_idxs, d_sorted, d_xy_sorted, N_clust):
-        """
-        """
-        N_stars = xy.shape[0]
-
-        # Select those clusters where the stars are different enough from a
-        # random distribution
-        N_survived, step_old = 0, 0
-
-        C_thresh = self.C_thresh_N / N_clust
-
-        # temp_accpt, temp_rjct = [], []
-
-        # last_dists = [100000]
-        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
-        N_break = 0
-
-        for step in np.arange(N_clust, N_stars, N_clust):
-
-            msk = d_idxs[step_old:step]
-
-            # d_step_range = d_sorted[step_old:step]
-            # d_step_range_xy = d_xy_sorted[step_old:step]
-
-            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
-            if not np.isnan(C_s):
-                # Cluster survived
-                if C_s >= C_thresh:
-                    N_survived += N_clust
-
-                    # # Break condition
-                    # d_avrg = np.median(d_step_range)
-                    # ld_avrg = np.median(last_dists)
-                    # ld_std = np.std(last_dists)
-                    # last_dists = 1. * d_step_range
-
-                    # if step_old != 0:
-                    #     temp_accpt.append([step, C_s, np.std(d_step_range_xy)])
-                else:
-                    # temp_rjct.append([step, C_s, np.std(d_step_range_xy)])
-                    N_break += 1
-
-            # Break condition
-            # if d_avrg > ld_avrg + self.N_std_d * ld_std:
-            #     break
-            if N_break > 10:
-                break
-
-            step_old = step
-
-        # import matplotlib.pyplot as plt
-        # temp_accpt = np.array(temp_accpt).T
-        # temp_rjct = np.array(temp_rjct).T
-        # plt.subplot(121)
-        # plt.title(f"{N_clust}, {N_survived}")
-        # plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
-        # plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
-        # plt.subplot(122)
-        # plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
-        # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
-        # plt.show()
-
-        return N_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
