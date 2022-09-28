@@ -327,16 +327,17 @@ class fastMP:
         # idx = np.argmin(abs(N_membs_d[1] - thresh_med))
         # N_survived = int(N_membs_d[0][idx])
 
-        # N_survived = self.get_stars(
-        #     xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
+        N_survived = self.get_stars(
+            xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, self.N_membs_min)
+        N_survived = max(N_survived, 10)
 
-        N_membs_d = []
-        for N_clust in range(self.N_membs_min, self.N_membs_max):
-            # Most probable members given their distances
-            N_survived = self.get_stars(
-                xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
-            N_membs_d.append(N_survived)
-        N_survived = int(np.median(N_membs_d))
+        # N_membs_d = []
+        # for N_clust in range(self.N_membs_min, self.N_membs_max):
+        #     # Most probable members given their distances
+        #     N_survived = self.get_stars(
+        #         xy, d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted, N_clust)
+        #     N_membs_d.append(N_survived)
+        # N_survived = int(np.median(N_membs_d))
 
         return N_survived
 
