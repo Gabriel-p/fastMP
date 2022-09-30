@@ -10,7 +10,7 @@ class fastMP:
 
     def __init__(self,
                  N_resample=100,
-                 N_membs_min=25,
+                 N_membs_min=20,
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
@@ -57,8 +57,8 @@ class fastMP:
         # Estimate the number of members
         N_survived = self.NmembsEstimate(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
+        # return None, None
 
-        # xy_c_all, vpd_c_all, plx_c_all = [], [], []
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
@@ -82,13 +82,6 @@ class fastMP:
             xy_c, vpd_c, plx_c = self.get_5D_center(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx])
-            #
-            # xy_c_all.append(xy_c)
-            # vpd_c_all.append(vpd_c)
-            # plx_c_all.append(plx_c)
-            # xy_c = list(np.median(xy_c_all, 0))
-            # vpd_c = list(np.median(vpd_c_all, 0))
-            # plx_c = np.median(plx_c_all)
 
             idx_selected += list(st_idx)
             N_runs += 1
@@ -312,62 +305,73 @@ class fastMP:
         d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted = self.get_3d_dists(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
+        # d_idxs, dists_5d_sorted = self.get_5d_dists(
+        #     xy_c, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx)
+
         xy = np.array([lon, lat]).T
 
         N_stars = xy.shape[0]
-
-        # Select those clusters where the stars are different enough from a
-        # random distribution
-        N_survived, step_old, idx_survived = 0, 0, []
-
         N_clust = self.N_membs_min
-        C_thresh = self.C_thresh_N / N_clust
 
-        # last_dists = [100000]
-        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
-        N_break = 0
+        for N_clust in (50,):
 
-        temp_accpt, temp_rjct, C_s_max = [], [], 0
+            # Select those clusters where the stars are different enough from a
+            # random distribution
+            N_survived, step_old, idx_survived = 0, 0, []
 
-        for step in np.arange(N_clust, N_stars, N_clust):
+            C_thresh = self.C_thresh_N / N_clust
 
-            msk = d_pm_plx_idxs[step_old:step]
+            # last_dists = [100000]
+            # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+            N_break = 0
 
-            # d_step_range = d_sorted[step_old:step]
-            # d_step_range_xy = d_xy_sorted[step_old:step]
+            # temp_accpt, temp_rjct, C_s_max = [], [], 0
 
-            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+            for step in np.arange(N_clust, N_stars, N_clust):
 
-            C_s_max = max(C_s_max, C_s)
+                msk = d_pm_plx_idxs[step_old:step]
 
-            if not np.isnan(C_s):
-                # Cluster survived
-                if C_s >= C_thresh:
+                # dist_5d_msk = dists_5d_sorted[msk]
+                # d_max = dist_5d_msk.max()
+                # msk2 = d_pm_plx_idxs[step:]
+                # msk_f = (dists_5d_sorted[msk2] < d_max).sum()
+                # # dens_delta = (N_clust / d_max) - (msk_f / d_max)
+                # dens_delta = N_clust / msk_f
 
-                    N_survived += N_clust
-                    idx_survived += list(msk)
+                # import matplotlib.pyplot as plt
+                # plt.scatter(lon[msk2], lat[msk2], c='grey', alpha=.5)
+                # plt.scatter(lon[msk], lat[msk], c='r', alpha=.5)
+                # plt.show()
 
-                    # if step_old != 0:
-                    #     temp_accpt.append([step, C_s, C_s/C_s_max])
-                else:
-                    # temp_rjct.append([step, C_s, C_s/C_s_max])
-                    # Break condition
-                    N_break += 1
+                C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
 
-            if N_break > 10:
-                break
+                # C_s_max = max(C_s_max, C_s)
 
-            step_old = step
+                if not np.isnan(C_s):
+                    # Cluster survived
+                    if C_s >= C_thresh:
 
-        # N_rand_rjct = 0
-        # for _ in range(1000):
-        #     idx_r = np.random.choice(idx_survived, N_clust, replace=False)
-        #     C_s = self.rkfunc(xy[idx_r], self.rads, self.Kest)
-        #     if np.isnan(C_s) or C_s < C_thresh:
-        #         N_rand_rjct += 1
-        # print(N_rand_rjct/100)
-        # N_survived -= N_survived * N_rand_rjct/1000
-        # N_survived = int(N_survived)
+                        N_survived += N_clust
+                        idx_survived += list(msk)
+
+                        # if step_old != 0:
+                        #     temp_accpt.append([step, C_s, dens_delta])
+
+                    else:
+                        # temp_rjct.append([step, C_s, dens_delta])
+                        # Break condition
+                        N_break += 1
+
+                if N_break > 5:
+                    break
+
+                step_old = step
+            # print(N_clust, N_survived)
+
+        cl_probs = self.probs(lon, lat, pmRA, pmDE, plx, idx_survived)
+
+        N_survived = int((cl_probs[idx_survived] > .5).sum())
+        print(N_clust, N_survived)
 
         # import matplotlib.pyplot as plt
         # temp_accpt = np.array(temp_accpt).T
@@ -381,12 +385,61 @@ class fastMP:
         # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
         # plt.show()
 
+        # plt.title("{}, {}".format(len(idx_survived), (cl_probs[idx_survived] > .5).sum()))
+        # plt.scatter(lon[idx_survived], lat[idx_survived], c=cl_probs[idx_survived])
+        # plt.colorbar()
+        # plt.show()
+        # breakpoint()
+
         if N_survived < 10:
             warnings.warn(
                 "The estimated number of cluster members is <10", UserWarning)
             N_survived = 10
 
         return N_survived
+
+    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
+        """
+        Assign probabilities to all stars after generating the KDEs for field and
+        member stars. The Cluster probability is obtained applying the formula for
+        two mutually exclusive and exhaustive hypotheses.
+        """
+
+        all_idxs = set(np.arange(0, len(lon)))
+        field_idxs = np.array(list(all_idxs.symmetric_difference(idx_survived)))
+
+        # # Combine coordinates with the rest of the features.
+        # all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
+        all_data = np.array([lon, lat]).T
+        # # Split into the two populations.
+        field_stars = all_data[field_idxs]
+        membs_stars = all_data[idx_survived]
+
+        # To improve the performance, cap the number of stars using a random
+        # selection of 'Nf_max' elements.
+        if field_stars.shape[0] > Nst_max:
+            idxs = np.arange(field_stars.shape[0])
+            np.random.shuffle(idxs)
+            field_stars = field_stars[idxs[:Nst_max]]
+
+        # Evaluate all stars in both KDEs
+        try:
+            kd_field = gaussian_kde(field_stars.T)
+            kd_memb = gaussian_kde(membs_stars.T)
+
+            L_memb = kd_memb.evaluate(all_data.T)
+            L_field = kd_field.evaluate(all_data.T)
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                # Probabilities for mutually exclusive and exhaustive
+                # hypotheses
+                cl_probs = 1. / (1. + (L_field / L_memb))
+
+        except (np.linalg.LinAlgError, ValueError):
+            warnings.warn("Could not perform KDE probabilities estimation")
+
+        return cl_probs
 
     def data_sample(self, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
         """
