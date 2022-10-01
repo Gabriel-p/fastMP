@@ -9,8 +9,8 @@ from scipy.stats import gaussian_kde, sigmaclip
 class fastMP:
 
     def __init__(self,
-                 N_resample=100,
-                 N_membs_min=20,
+                 N_resample=0,
+                 N_membs_min=50,
                  N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
@@ -54,11 +54,11 @@ class fastMP:
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
 
-        # Estimate the number of members
-        N_survived = self.NmembsEstimate(
-            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
-        # return None, None
+        # # Estimate the number of members
+        # N_survived = self.NmembsEstimate(
+        #     lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
+        N_survived = []
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
@@ -66,25 +66,38 @@ class fastMP:
             s_pmRA, s_pmDE, s_plx = self.data_sample(
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
-            # Indexes of the sorted 5D distances 5D to the estimated center
-            d_idxs = self.get_5d_dists(
-                xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
+            # Estimate the number of members
+            st_idx, probs_idx = self.NmembsEstimate(
+                lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c)
+            N_survived.append(len(st_idx))
 
-            # Star selection
-            st_idx = d_idxs[:N_survived]
+            # # Indexes of the sorted 5D distances 5D to the estimated center
+            # d_idxs = self.get_5d_dists(
+            #     xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
 
-            # Filter outlier field stars
-            msk = self.PMPlxFilter(
-                pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
-            st_idx = st_idx[msk]
+            # # Star selection
+            # st_idx = d_idxs[:N_survived]
 
-            # Re-estimate centers using the selected stars
-            xy_c, vpd_c, plx_c = self.get_5D_center(
-                lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
-                plx[st_idx])
+            # # Filter outlier field stars
+            # msk = self.PMPlxFilter(
+            #     pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
+            # st_idx = st_idx[msk]
+
+            # # Re-estimate centers using the selected stars
+            # xy_c, vpd_c, plx_c = self.get_5D_center(
+            #     lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
+            #     plx[st_idx])
 
             idx_selected += list(st_idx)
             N_runs += 1
+
+        N_survived = int(np.median(N_survived))
+        N_stars = msk_accpt.sum()
+        probs_all = np.zeros(N_stars)
+        probs_all[st_idx] = probs_idx
+        probs_final = np.zeros(len(msk_accpt)) - 1
+        probs_final[msk_accpt] = probs_all
+        return probs_final, N_survived
 
         probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
@@ -305,75 +318,57 @@ class fastMP:
         d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted = self.get_3d_dists(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        # d_idxs, dists_5d_sorted = self.get_5d_dists(
-        #     xy_c, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx)
-
         xy = np.array([lon, lat]).T
 
         N_stars = xy.shape[0]
         N_clust = self.N_membs_min
 
-        for N_clust in (50,):
+        # Select those clusters where the stars are different enough from a
+        # random distribution
+        N_survived, step_old, idx_survived = 0, 0, []
 
-            # Select those clusters where the stars are different enough from a
-            # random distribution
-            N_survived, step_old, idx_survived = 0, 0, []
+        C_thresh = self.C_thresh_N / N_clust
 
-            C_thresh = self.C_thresh_N / N_clust
+        # last_dists = [100000]
+        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
+        N_break = 0
 
-            # last_dists = [100000]
-            # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
-            N_break = 0
+        # temp_accpt, temp_rjct, C_s_max = [], [], 0
 
-            # temp_accpt, temp_rjct, C_s_max = [], [], 0
+        for step in np.arange(N_clust, N_stars, N_clust):
 
-            for step in np.arange(N_clust, N_stars, N_clust):
+            msk = d_pm_plx_idxs[step_old:step]
+            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
 
-                msk = d_pm_plx_idxs[step_old:step]
+            if not np.isnan(C_s):
+                # Cluster survived
+                if C_s >= C_thresh:
 
-                # dist_5d_msk = dists_5d_sorted[msk]
-                # d_max = dist_5d_msk.max()
-                # msk2 = d_pm_plx_idxs[step:]
-                # msk_f = (dists_5d_sorted[msk2] < d_max).sum()
-                # # dens_delta = (N_clust / d_max) - (msk_f / d_max)
-                # dens_delta = N_clust / msk_f
+                    N_survived += N_clust
+                    idx_survived += list(msk)
 
-                # import matplotlib.pyplot as plt
-                # plt.scatter(lon[msk2], lat[msk2], c='grey', alpha=.5)
-                # plt.scatter(lon[msk], lat[msk], c='r', alpha=.5)
-                # plt.show()
+                    # if step_old != 0:
+                    #     temp_accpt.append([step, C_s, dens_delta])
 
-                C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+                else:
+                    # temp_rjct.append([step, C_s, dens_delta])
+                    # Break condition
+                    N_break += 1
 
-                # C_s_max = max(C_s_max, C_s)
+            if N_break > 5:
+                break
 
-                if not np.isnan(C_s):
-                    # Cluster survived
-                    if C_s >= C_thresh:
-
-                        N_survived += N_clust
-                        idx_survived += list(msk)
-
-                        # if step_old != 0:
-                        #     temp_accpt.append([step, C_s, dens_delta])
-
-                    else:
-                        # temp_rjct.append([step, C_s, dens_delta])
-                        # Break condition
-                        N_break += 1
-
-                if N_break > 5:
-                    break
-
-                step_old = step
-            # print(N_clust, N_survived)
+            step_old = step
 
         cl_probs = self.probs(lon, lat, pmRA, pmDE, plx, idx_survived)
 
-        N_survived = int((cl_probs[idx_survived] > .5).sum())
-        print(N_clust, N_survived)
+        # msk = cl_probs > .5
+        # return np.array(idx_survived)[msk], cl_probs
+        return idx_survived, cl_probs
 
-        # import matplotlib.pyplot as plt
+        N_survived = int((cl_probs > .5).sum())
+
+        import matplotlib.pyplot as plt
         # temp_accpt = np.array(temp_accpt).T
         # temp_rjct = np.array(temp_rjct).T
         # plt.subplot(121)
@@ -385,11 +380,11 @@ class fastMP:
         # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
         # plt.show()
 
-        # plt.title("{}, {}".format(len(idx_survived), (cl_probs[idx_survived] > .5).sum()))
-        # plt.scatter(lon[idx_survived], lat[idx_survived], c=cl_probs[idx_survived])
-        # plt.colorbar()
-        # plt.show()
-        # breakpoint()
+        plt.title("{}, {}".format(len(idx_survived), (cl_probs > .5).sum()))
+        plt.scatter(lon[idx_survived], lat[idx_survived], c=cl_probs)
+        plt.colorbar()
+        plt.show()
+        breakpoint()
 
         if N_survived < 10:
             warnings.warn(
@@ -398,7 +393,7 @@ class fastMP:
 
         return N_survived
 
-    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
+    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=1000):
         """
         Assign probabilities to all stars after generating the KDEs for field and
         member stars. The Cluster probability is obtained applying the formula for
@@ -427,8 +422,8 @@ class fastMP:
             kd_field = gaussian_kde(field_stars.T)
             kd_memb = gaussian_kde(membs_stars.T)
 
-            L_memb = kd_memb.evaluate(all_data.T)
-            L_field = kd_field.evaluate(all_data.T)
+            L_memb = kd_memb.evaluate(membs_stars.T)
+            L_field = kd_field.evaluate(membs_stars.T)
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
