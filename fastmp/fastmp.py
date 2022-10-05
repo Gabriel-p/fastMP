@@ -9,24 +9,24 @@ from scipy.stats import gaussian_kde, sigmaclip
 class fastMP:
 
     def __init__(self,
-                 N_resample=0,
+                 N_resample=100,
                  N_membs_min=50,
-                 N_membs_max=50,
+                 # N_membs_max=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
                  hardPcRad=15,
-                 N_std_d=50,
+                 # N_std_d=50,
                  xy_c=None,
                  vpd_c=None,
                  plx_c=None,
                  fixed_centers=False):
         self.N_resample = N_resample
         self.N_membs_min = N_membs_min
-        self.N_membs_max = N_membs_max
+        # self.N_membs_max = N_membs_max
         self.hardPMRad = hardPMRad
         self.hardPlxRad = hardPlxRad
         self.hardPcRad = hardPcRad
-        self.N_std_d = N_std_d
+        # self.N_std_d = N_std_d
         self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
@@ -54,52 +54,57 @@ class fastMP:
         # Prepare Ripley's K data
         self.rkparams(lon, lat)
 
-        # # Estimate the number of members
-        # N_survived = self.NmembsEstimate(
-        #     lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
+        # Estimate the number of members
+        N_survived = self.NmembsEstimate(
+            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
 
-        N_survived = []
-        N_runs, idx_selected = 0, []
+        probs_dist, probs_count = np.zeros(len(lon)), np.zeros(len(lon))
+
+        N_runs, idx_selected, probs_selected = 0, [], []
         for _ in range(self.N_resample + 1):
 
-            # Sample data (if requested)
+            # Sample data
             s_pmRA, s_pmDE, s_plx = self.data_sample(
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
-            # Estimate the number of members
-            st_idx, probs_idx = self.NmembsEstimate(
-                lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c)
-            N_survived.append(len(st_idx))
+            # Indexes of the sorted 5D distances 5D to the estimated center
+            d_idxs, d_all = self.get_5d_dists(
+                xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
 
-            # # Indexes of the sorted 5D distances 5D to the estimated center
-            # d_idxs = self.get_5d_dists(
-            #     xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
+            # Star selection
+            st_idx = d_idxs[:N_survived]
 
-            # # Star selection
-            # st_idx = d_idxs[:N_survived]
+            # Filter outlier field stars
+            msk = self.PMPlxFilter(
+                pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
+            st_idx = st_idx[msk]
 
-            # # Filter outlier field stars
-            # msk = self.PMPlxFilter(
-            #     pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
-            # st_idx = st_idx[msk]
+            d_sel = d_all[st_idx]
+            delta_d = d_sel.min() - d_sel.max()
+            m = 1 / (2 * delta_d)
+            b = 3 / 4 - (d_sel.max() + d_sel.min()) / (4 * delta_d)
+            d_probs = m * d_sel + b
 
-            # # Re-estimate centers using the selected stars
-            # xy_c, vpd_c, plx_c = self.get_5D_center(
-            #     lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
-            #     plx[st_idx])
+            for i, st_i in enumerate(st_idx):
+                probs_dist[st_i] += d_probs[i]
+                probs_count[st_i] += 1
+
+            # Re-estimate centers using the selected stars
+            xy_c, vpd_c, plx_c = self.get_5D_center(
+                lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
+                plx[st_idx])
 
             idx_selected += list(st_idx)
+            probs_selected += list(d_probs)
             N_runs += 1
 
-        N_survived = int(np.median(N_survived))
-        N_stars = msk_accpt.sum()
-        probs_all = np.zeros(N_stars)
-        probs_all[st_idx] = probs_idx
-        probs_final = np.zeros(len(msk_accpt)) - 1
-        probs_final[msk_accpt] = probs_all
-        return probs_final, N_survived
+        msk = probs_dist > 0
+        probs_dist[msk] = probs_dist[msk] / probs_count[msk]
 
-        probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
+        probs_final = np.zeros(len(msk_accpt)) - 1
+        probs_final[msk_accpt] = probs_dist
+
+        # probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
 
         return probs_final, N_survived
 
@@ -311,12 +316,11 @@ class fastMP:
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
+    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
         """
         Estimate the number of cluster members
         """
-        d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted = self.get_3d_dists(
-            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
+        d_pm_plx_idxs = self.get_3d_dists(pmRA, pmDE, plx, vpd_c, plx_c)
 
         xy = np.array([lon, lat]).T
 
@@ -325,16 +329,11 @@ class fastMP:
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        N_survived, step_old, idx_survived = 0, 0, []
+        step_old, idx_survived = 0, []
 
         C_thresh = self.C_thresh_N / N_clust
 
-        # last_dists = [100000]
-        # ld_avrg, ld_std, d_avrg = 0, 0, -np.inf
         N_break = 0
-
-        # temp_accpt, temp_rjct, C_s_max = [], [], 0
-
         for step in np.arange(N_clust, N_stars, N_clust):
 
             msk = d_pm_plx_idxs[step_old:step]
@@ -343,48 +342,17 @@ class fastMP:
             if not np.isnan(C_s):
                 # Cluster survived
                 if C_s >= C_thresh:
-
-                    N_survived += N_clust
                     idx_survived += list(msk)
-
-                    # if step_old != 0:
-                    #     temp_accpt.append([step, C_s, dens_delta])
-
                 else:
-                    # temp_rjct.append([step, C_s, dens_delta])
                     # Break condition
                     N_break += 1
-
             if N_break > 5:
                 break
-
             step_old = step
 
         cl_probs = self.probs(lon, lat, pmRA, pmDE, plx, idx_survived)
 
-        # msk = cl_probs > .5
-        # return np.array(idx_survived)[msk], cl_probs
-        return idx_survived, cl_probs
-
         N_survived = int((cl_probs > .5).sum())
-
-        import matplotlib.pyplot as plt
-        # temp_accpt = np.array(temp_accpt).T
-        # temp_rjct = np.array(temp_rjct).T
-        # plt.subplot(121)
-        # plt.title(f"{N_clust}, {N_survived}")
-        # plt.scatter(temp_accpt[0], temp_accpt[1], c='g', alpha=.7)
-        # plt.scatter(temp_rjct[0], temp_rjct[1], c='r', alpha=.7)
-        # plt.subplot(122)
-        # plt.scatter(temp_accpt[0][:-1], temp_accpt[2][:-1], c='g', alpha=.7)
-        # plt.scatter(temp_rjct[0][:-1], temp_rjct[2][:-1], c='r', alpha=.7)
-        # plt.show()
-
-        plt.title("{}, {}".format(len(idx_survived), (cl_probs > .5).sum()))
-        plt.scatter(lon[idx_survived], lat[idx_survived], c=cl_probs)
-        plt.colorbar()
-        plt.show()
-        breakpoint()
 
         if N_survived < 10:
             warnings.warn(
@@ -393,7 +361,7 @@ class fastMP:
 
         return N_survived
 
-    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=1000):
+    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
         """
         Assign probabilities to all stars after generating the KDEs for field and
         member stars. The Cluster probability is obtained applying the formula for
@@ -432,7 +400,8 @@ class fastMP:
                 cl_probs = 1. / (1. + (L_field / L_memb))
 
         except (np.linalg.LinAlgError, ValueError):
-            warnings.warn("Could not perform KDE probabilities estimation")
+            # warnings.warn("Could not perform KDE probabilities estimation")
+            cl_probs = np.ones(len(lon))
 
         return cl_probs
 
@@ -448,7 +417,7 @@ class fastMP:
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
 
-    def get_3d_dists(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
+    def get_3d_dists(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
         Obtain indexes and distances of stars to the PMs+Plx center
         """
@@ -458,14 +427,14 @@ class fastMP:
         dist_3d = cdist(PMsPlx_data, all_c).T[0]
         # Indexes that sort the distances
         d_pm_plx_idxs = dist_3d.argsort()
-        # Sorted distances
-        d_pm_plx_sorted = dist_3d[d_pm_plx_idxs]
+        # # Sorted distances
+        # d_pm_plx_sorted = dist_3d[d_pm_plx_idxs]
 
-        # Distances to this center
-        dist_xy = cdist(np.array([lon, lat]).T, np.array([xy_c])).T[0]
-        d_xy_sorted = dist_xy[d_pm_plx_idxs]
+        # # Distances to this center
+        # dist_xy = cdist(np.array([lon, lat]).T, np.array([xy_c])).T[0]
+        # d_xy_sorted = dist_xy[d_pm_plx_idxs]
 
-        return d_pm_plx_idxs, d_pm_plx_sorted, d_xy_sorted
+        return d_pm_plx_idxs  # , d_pm_plx_sorted, d_xy_sorted
 
     def get_5d_dists(
             self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx):
@@ -478,7 +447,7 @@ class fastMP:
         all_dist = cdist(all_data, all_c).T[0]
         d_idxs = all_dist.argsort()
 
-        return d_idxs
+        return d_idxs, all_dist
 
     def rkfunc(self, xy, rads, Kest):
         """
