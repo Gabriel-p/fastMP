@@ -3,30 +3,28 @@ import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
-from scipy.stats import gaussian_kde, sigmaclip
+from scipy.stats import gaussian_kde
 
 
 class fastMP:
 
     def __init__(self,
                  N_resample=100,
-                 N_membs_min=50,
-                 # N_membs_max=50,
+                 N_clust=50,
                  hardPMRad=3,
                  hardPlxRad=0.2,
                  hardPcRad=15,
-                 # N_std_d=50,
+                 N_break=5,
                  xy_c=None,
                  vpd_c=None,
                  plx_c=None,
                  fixed_centers=False):
         self.N_resample = N_resample
-        self.N_membs_min = N_membs_min
-        # self.N_membs_max = N_membs_max
+        self.N_clust = N_clust
         self.hardPMRad = hardPMRad
         self.hardPlxRad = hardPlxRad
         self.hardPcRad = hardPcRad
-        # self.N_std_d = N_std_d
+        self.N_break = N_break
         self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
@@ -36,7 +34,7 @@ class fastMP:
         """
         """
         # Remove nans
-        msk_accpt, X = self.nanRjct(X)
+        msk_accpt, X = self.reject_nans(X)
 
         # Unpack input data
         if self.N_resample > 0:
@@ -48,19 +46,17 @@ class fastMP:
 
         # Remove the most obvious field stars to speed up the process
         msk_accpt, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, e_pmRA,\
-            e_pmDE, e_plx = self.firstFilter(
+            e_pmDE, e_plx = self.first_filter(
                 msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
         # Prepare Ripley's K data
-        self.rkparams(lon, lat)
+        self.init_ripley(lon, lat)
 
         # Estimate the number of members
-        N_survived = self.NmembsEstimate(
+        N_survived = self.estimate_nmembs(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
 
-        probs_dist, probs_count = np.zeros(len(lon)), np.zeros(len(lon))
-
-        N_runs, idx_selected, probs_selected = 0, [], []
+        N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
 
             # Sample data
@@ -68,26 +64,16 @@ class fastMP:
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
             # Indexes of the sorted 5D distances 5D to the estimated center
-            d_idxs, d_all = self.get_5d_dists(
+            d_idxs = self.get_5d_dists(
                 xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
 
             # Star selection
             st_idx = d_idxs[:N_survived]
 
             # Filter outlier field stars
-            msk = self.PMPlxFilter(
+            msk = self.filter_pms_plx(
                 pmRA[st_idx], pmDE[st_idx], plx[st_idx], vpd_c, plx_c)
             st_idx = st_idx[msk]
-
-            d_sel = d_all[st_idx]
-            delta_d = d_sel.min() - d_sel.max()
-            m = 1 / (2 * delta_d)
-            b = 3 / 4 - (d_sel.max() + d_sel.min()) / (4 * delta_d)
-            d_probs = m * d_sel + b
-
-            for i, st_i in enumerate(st_idx):
-                probs_dist[st_i] += d_probs[i]
-                probs_count[st_i] += 1
 
             # Re-estimate centers using the selected stars
             xy_c, vpd_c, plx_c = self.get_5D_center(
@@ -95,20 +81,13 @@ class fastMP:
                 plx[st_idx])
 
             idx_selected += list(st_idx)
-            probs_selected += list(d_probs)
             N_runs += 1
 
-        msk = probs_dist > 0
-        probs_dist[msk] = probs_dist[msk] / probs_count[msk]
-
-        probs_final = np.zeros(len(msk_accpt)) - 1
-        probs_final[msk_accpt] = probs_dist
-
-        # probs_final = self.assignProbs(msk_accpt, idx_selected, N_runs)
+        probs_final = self.assign_probs(msk_accpt, idx_selected, N_runs)
 
         return probs_final, N_survived
 
-    def nanRjct(self, data):
+    def reject_nans(self, data):
         """
         Remove nans
         """
@@ -122,15 +101,15 @@ class fastMP:
 
         return msk_accpt, data.T[msk_accpt].T
 
-    def firstFilter(
-            self, msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx):
+    def first_filter(self, msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA,
+                     e_pmDE, e_plx):
         """
         """
         # Estimate initial center
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
 
         # Remove obvious field stars
-        msk = self.PMPlxFilter(pmRA, pmDE, plx, vpd_c, plx_c)
+        msk = self.filter_pms_plx(pmRA, pmDE, plx, vpd_c, plx_c)
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
             plx[msk]
@@ -195,7 +174,7 @@ class fastMP:
                 + (plx - self.plx_c)**2
 
         # Closest stars to the selected center
-        idx = dist.argsort()[:M * self.N_membs_min]  # HARDCODED
+        idx = dist.argsort()[:M * self.N_clust]  # HARDCODED
 
         # Estimate 5D center with KDE
         d1, d2, d3, d4, d5 = lon[idx], lat[idx], pmRA[idx], pmDE[idx], plx[idx]
@@ -207,16 +186,6 @@ class fastMP:
         # Extract new centers as those associated to the maximum density
         x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
         vpd_c = (pmra_c, pmde_c)
-
-        # # Estimate 3D center with KDE
-        # d1, d2, d5 = lon[idx], lat[idx], plx[idx]
-        # d1_5 = np.vstack([d1, d2, d5])
-        # # Define Gaussian KDE
-        # kde = gaussian_kde(d1_5)
-        # # Evaluate in the selected closest stars to the center
-        # density = kde(d1_5)
-        # # Extract new centers as those associated to the maximum density
-        # x_c, y_c, plx_c = d1_5[:, density.argmax()]
 
         if self.fixed_centers is True:
             if self.xy_c is not None:
@@ -268,7 +237,7 @@ class fastMP:
 
         return (cx, cy)
 
-    def PMPlxFilter(self, pmRA, pmDE, plx, vpd_c, plx_c):
+    def filter_pms_plx(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
         Identify obvious field stars
         """
@@ -290,7 +259,7 @@ class fastMP:
 
         return msk
 
-    def rkparams(self, lon, lat):
+    def init_ripley(self, lon, lat):
         """
         https://rdrr.io/cran/spatstat/man/Kest.html
         "For a rectangular window it is prudent to restrict the r values to a
@@ -316,16 +285,16 @@ class fastMP:
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def NmembsEstimate(self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c):
+    def estimate_nmembs(self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c,
+                        prob_cut=.5):
         """
         Estimate the number of cluster members
         """
         d_pm_plx_idxs = self.get_3d_dists(pmRA, pmDE, plx, vpd_c, plx_c)
 
         xy = np.array([lon, lat]).T
-
         N_stars = xy.shape[0]
-        N_clust = self.N_membs_min
+        N_clust = self.N_clust
 
         # Select those clusters where the stars are different enough from a
         # random distribution
@@ -333,7 +302,7 @@ class fastMP:
 
         C_thresh = self.C_thresh_N / N_clust
 
-        N_break = 0
+        N_break_count = 0
         for step in np.arange(N_clust, N_stars, N_clust):
 
             msk = d_pm_plx_idxs[step_old:step]
@@ -345,14 +314,14 @@ class fastMP:
                     idx_survived += list(msk)
                 else:
                     # Break condition
-                    N_break += 1
-            if N_break > 5:
+                    N_break_count += 1
+            if N_break_count > self.N_break:
                 break
             step_old = step
 
-        cl_probs = self.probs(lon, lat, pmRA, pmDE, plx, idx_survived)
+        cl_probs = self.kde_probs(lon, lat, pmRA, pmDE, plx, idx_survived)
 
-        N_survived = int((cl_probs > .5).sum())
+        N_survived = int((cl_probs > prob_cut).sum())
 
         if N_survived < 10:
             warnings.warn(
@@ -361,19 +330,71 @@ class fastMP:
 
         return N_survived
 
-    def probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
+    def get_3d_dists(self, pmRA, pmDE, plx, vpd_c, plx_c):
         """
-        Assign probabilities to all stars after generating the KDEs for field and
-        member stars. The Cluster probability is obtained applying the formula for
-        two mutually exclusive and exhaustive hypotheses.
+        Obtain indexes and distances of stars to the PMs+Plx center
+        """
+        all_c = np.array([list(vpd_c) + [plx_c]])
+        # Distances to this center
+        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
+        dist_3d = cdist(PMsPlx_data, all_c).T[0]
+        # Indexes that sort the distances
+        d_pm_plx_idxs = dist_3d.argsort()
+
+        return d_pm_plx_idxs
+
+    def rkfunc(self, xy, rads, Kest):
+        """
+        Test how similar this cluster's (x, y) distribution is compared
+        to a uniform random distribution using Ripley's K.
+        https://stats.stackexchange.com/a/122816/10416
+
+        Parameters
+        ----------
+        xy : TYPE
+            Description
+        rads : TYPE
+            Description
+        Kest : TYPE
+            Description
+
+        Returns
+        -------
+        TYPE
+            Description
+        """
+        # Avoid large memory consumption if the data array is too big
+        # if xy.shape[0] > 5000:
+        #     mode = "none"
+        # else:
+        #     mode = 'translation'
+
+        # Hide RunTimeWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            L_t = Kest.Lfunction(xy, rads, mode='translation')
+
+        # Catch all-nans. Avoid 'RuntimeWarning: All-NaN slice encountered'
+        if np.isnan(L_t).all():
+            C_s = np.nan
+        else:
+            C_s = np.nanmax(abs(L_t - rads))
+
+        return C_s
+
+    def kde_probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
+        """
+        Assign probabilities to all stars after generating the KDEs for field
+        and member stars. The cluster member probability is obtained applying
+        the formula for two mutually exclusive and exhaustive hypotheses.
         """
 
         all_idxs = set(np.arange(0, len(lon)))
         field_idxs = np.array(list(all_idxs.symmetric_difference(idx_survived)))
 
         # # Combine coordinates with the rest of the features.
-        # all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
-        all_data = np.array([lon, lat]).T
+        all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
+        # all_data = np.array([lon, lat]).T
         # # Split into the two populations.
         field_stars = all_data[field_idxs]
         membs_stars = all_data[idx_survived]
@@ -417,27 +438,8 @@ class fastMP:
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
 
-    def get_3d_dists(self, pmRA, pmDE, plx, vpd_c, plx_c):
-        """
-        Obtain indexes and distances of stars to the PMs+Plx center
-        """
-        all_c = np.array([list(vpd_c) + [plx_c]])
-        # Distances to this center
-        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
-        dist_3d = cdist(PMsPlx_data, all_c).T[0]
-        # Indexes that sort the distances
-        d_pm_plx_idxs = dist_3d.argsort()
-        # # Sorted distances
-        # d_pm_plx_sorted = dist_3d[d_pm_plx_idxs]
-
-        # # Distances to this center
-        # dist_xy = cdist(np.array([lon, lat]).T, np.array([xy_c])).T[0]
-        # d_xy_sorted = dist_xy[d_pm_plx_idxs]
-
-        return d_pm_plx_idxs  # , d_pm_plx_sorted, d_xy_sorted
-
-    def get_5d_dists(
-            self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx):
+    def get_5d_dists(self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE,
+                     s_plx):
         """
         Obtain the distances of all stars to the center and sort by the
         smallest value.
@@ -447,48 +449,9 @@ class fastMP:
         all_dist = cdist(all_data, all_c).T[0]
         d_idxs = all_dist.argsort()
 
-        return d_idxs, all_dist
+        return d_idxs
 
-    def rkfunc(self, xy, rads, Kest):
-        """
-        Test how similar this cluster's (x, y) distribution is compared
-        to a uniform random distribution using Ripley's K.
-        https://stats.stackexchange.com/a/122816/10416
-
-        Parameters
-        ----------
-        xy : TYPE
-            Description
-        rads : TYPE
-            Description
-        Kest : TYPE
-            Description
-
-        Returns
-        -------
-        TYPE
-            Description
-        """
-        # Avoid large memory consumption if the data array is too big
-        # if xy.shape[0] > 5000:
-        #     mode = "none"
-        # else:
-        #     mode = 'translation'
-
-        # Hide RunTimeWarning
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            L_t = Kest.Lfunction(xy, rads, mode='translation')
-
-        # Catch all-nans. Avoid 'RuntimeWarning: All-NaN slice encountered'
-        if np.isnan(L_t).all():
-            C_s = np.nan
-        else:
-            C_s = np.nanmax(abs(L_t - rads))
-
-        return C_s
-
-    def assignProbs(self, msk_accpt, idx_selected, N_runs):
+    def assign_probs(self, msk_accpt, idx_selected, N_runs):
         """
         """
         # Initial -1 probabilities for *all* stars
