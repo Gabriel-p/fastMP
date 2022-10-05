@@ -11,9 +11,10 @@ class fastMP:
     def __init__(self,
                  N_resample=100,
                  N_clust=50,
-                 hardPMRad=3,
-                 hardPlxRad=0.2,
-                 hardPcRad=15,
+                 PM_rad=3,
+                 PM_cent_rad=0.5,
+                 plx_rad=0.2,
+                 pc_rad=15,
                  N_break=5,
                  xy_c=None,
                  vpd_c=None,
@@ -21,9 +22,10 @@ class fastMP:
                  fixed_centers=False):
         self.N_resample = N_resample
         self.N_clust = N_clust
-        self.hardPMRad = hardPMRad
-        self.hardPlxRad = hardPlxRad
-        self.hardPcRad = hardPcRad
+        self.PM_rad = PM_rad
+        self.PM_cent_rad = PM_cent_rad
+        self.plx_rad = plx_rad
+        self.pc_rad = pc_rad
         self.N_break = N_break
         self.xy_c = xy_c
         self.vpd_c = vpd_c
@@ -245,14 +247,14 @@ class fastMP:
         dist_pm = cdist(pms, np.array([vpd_c])).T[0]
 
         # Hard PMs limit
-        pmRad = max(self.hardPMRad, .5 * abs(vpd_c[0]))  # HARDCODED
+        pmRad = max(self.PM_rad, self.PM_cent_rad * abs(vpd_c[0]))
 
         # Hard Plx limit
         d_pc = 1000 / plx_c
-        plx_min = 1000 / (d_pc + self.hardPcRad)
-        plx_max = max(.05, 1000 / (d_pc - self.hardPcRad))  # HARDCODED
-        plxRad_min = max(self.hardPlxRad, plx_c - plx_min)
-        plxRad_max = max(self.hardPlxRad, plx_max - plx_c)
+        plx_min = 1000 / (d_pc + self.pc_rad)
+        plx_max = max(.05, 1000 / (d_pc - self.pc_rad))  # HARDCODED
+        plxRad_min = max(self.plx_rad, plx_c - plx_min)
+        plxRad_max = max(self.plx_rad, plx_max - plx_c)
 
         msk = (dist_pm < pmRad) & (plx - plx_c < plxRad_max)\
             & (plx_c - plx < plxRad_min)
@@ -295,14 +297,11 @@ class fastMP:
         xy = np.array([lon, lat]).T
         N_stars = xy.shape[0]
         N_clust = self.N_clust
+        C_thresh = self.C_thresh_N / N_clust
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        step_old, idx_survived = 0, []
-
-        C_thresh = self.C_thresh_N / N_clust
-
-        N_break_count = 0
+        N_break_count, step_old, idx_survived = 0, 0, []
         for step in np.arange(N_clust, N_stars, N_clust):
 
             msk = d_pm_plx_idxs[step_old:step]
@@ -319,7 +318,14 @@ class fastMP:
                 break
             step_old = step
 
-        cl_probs = self.kde_probs(lon, lat, pmRA, pmDE, plx, idx_survived)
+        cl_probs = self.kde_probs(lon, lat, idx_survived)
+
+        import matplotlib.pyplot as plt
+        plt.scatter(lon[idx_survived], lat[idx_survived], c=cl_probs, alpha=.5)
+        plt.colorbar()
+        # plt.scatter(lon[idx_survived], lat[idx_survived], c=, alpha=.5)
+        plt.show()
+        breakpoint()
 
         N_survived = int((cl_probs > prob_cut).sum())
 
@@ -382,7 +388,7 @@ class fastMP:
 
         return C_s
 
-    def kde_probs(self, lon, lat, pmRA, pmDE, plx, idx_survived, Nst_max=5000):
+    def kde_probs(self, lon, lat, idx_survived, Nst_max=5000):
         """
         Assign probabilities to all stars after generating the KDEs for field
         and member stars. The cluster member probability is obtained applying
@@ -390,12 +396,13 @@ class fastMP:
         """
 
         all_idxs = set(np.arange(0, len(lon)))
-        field_idxs = np.array(list(all_idxs.symmetric_difference(idx_survived)))
+        field_idxs = np.array(list(
+            all_idxs.symmetric_difference(idx_survived)))
 
-        # # Combine coordinates with the rest of the features.
-        all_data = np.array([lon, lat, pmRA, pmDE, plx]).T
-        # all_data = np.array([lon, lat]).T
-        # # Split into the two populations.
+        # Combine coordinates with the rest of the features.
+        all_data = np.array([lon, lat]).T
+
+        # Split into the two populations.
         field_stars = all_data[field_idxs]
         membs_stars = all_data[idx_survived]
 
