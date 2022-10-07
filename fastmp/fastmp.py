@@ -11,6 +11,7 @@ class fastMP:
     def __init__(self,
                  N_resample=100,
                  N_clust=50,
+                 fix_N_clust=False,
                  PM_rad=3,
                  PM_cent_rad=0.5,
                  plx_rad=0.2,
@@ -22,6 +23,7 @@ class fastMP:
                  fixed_centers=False):
         self.N_resample = N_resample
         self.N_clust = N_clust
+        self.fix_N_clust = fix_N_clust,
         self.PM_rad = PM_rad
         self.PM_cent_rad = PM_cent_rad
         self.plx_rad = plx_rad
@@ -51,12 +53,33 @@ class fastMP:
             e_pmDE, e_plx = self.first_filter(
                 msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
+        # from astropy.coordinates import SkyCoord
+        # from astropy.coordinates import Galactic
+        # import astropy.units as u
+        # gc = SkyCoord(l=lon * u.degree, b=lat * u.degree, frame='galactic')
+        # sc = SkyCoord(gc.fk5.ra, gc.fk5.dec, pm_ra_cosdec=pmRA * u.mas / u.yr,
+        #               pm_dec=pmDE * u.mas / u.yr)
+        # aa = sc.transform_to(Galactic())
+        # pm_l = aa.pm_l_cosb.value
+        # pm_b = aa.pm_b.value
+
+        # import matplotlib.pyplot as plt
+        # plt.subplot(121)
+        # plt.scatter(pmRA, pmDE, alpha=.5)
+        # plt.subplot(122)
+        # plt.scatter(pm_l, pm_b, alpha=.5)
+        # plt.show()
+        # return None, None
+
         # Prepare Ripley's K data
         self.init_ripley(lon, lat)
 
         # Estimate the number of members
-        N_survived = self.estimate_nmembs(
-            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
+        if self.fix_N_clust is False:
+            N_survived = self.estimate_nmembs(
+                lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
+        else:
+            N_survived = int(self.fix_N_clust)
 
         N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
