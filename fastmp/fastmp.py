@@ -53,24 +53,6 @@ class fastMP:
             e_pmDE, e_plx = self.first_filter(
                 msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
-        # from astropy.coordinates import SkyCoord
-        # from astropy.coordinates import Galactic
-        # import astropy.units as u
-        # gc = SkyCoord(l=lon * u.degree, b=lat * u.degree, frame='galactic')
-        # sc = SkyCoord(gc.fk5.ra, gc.fk5.dec, pm_ra_cosdec=pmRA * u.mas / u.yr,
-        #               pm_dec=pmDE * u.mas / u.yr)
-        # aa = sc.transform_to(Galactic())
-        # pm_l = aa.pm_l_cosb.value
-        # pm_b = aa.pm_b.value
-
-        # import matplotlib.pyplot as plt
-        # plt.subplot(121)
-        # plt.scatter(pmRA, pmDE, alpha=.5)
-        # plt.subplot(122)
-        # plt.scatter(pm_l, pm_b, alpha=.5)
-        # plt.show()
-        # return None, None
-
         # Prepare Ripley's K data
         self.init_ripley(lon, lat)
 
