@@ -12,46 +12,13 @@ import matplotlib.pyplot as plt
 TODO:
 
 1. Estimate 'plx_rad' from plx error data
-2. Remove function to detect 2nd cluster in coords
 3. Use only 'N_clust' or (50, 25) in 'estimate_nmembs'?
 
 """
 
 
 class fastMP:
-    """Summary
-
-    Attributes
-    ----------
-    coord_dens_perc : TYPE
-        Description
-    fix_N_clust : TYPE
-        Description
-    fixed_centers : TYPE
-        Description
-    N_break : TYPE
-        Description
-    N_clust : TYPE
-        Description
-    N_resample : TYPE
-        Description
-    pc_rad : TYPE
-        Description
-    plx_c : TYPE
-        Description
-    plx_rad : float
-        Maximum cluster radius in parsec
-        This value should be enough for most clusters but there are clusters
-        with a more extended region. In these cases this parameter needs to
-        be increased.
-    PM_cent_rad : TYPE
-        Description
-    PM_rad : TYPE
-        Description
-    vpd_c : TYPE
-        Description
-    xy_c : TYPE
-        Description
+    """
     """
 
     def __init__(self,
@@ -143,33 +110,18 @@ class fastMP:
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
             # Indexes of the sorted 5D distances 5D to the estimated center
-            d_idxs = self.get_5d_dists(
-                xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE, s_plx)
+            cents_5d = np.array([xy_c + vpd_c + [plx_c]])
+            data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+            d_idxs = self.get_Nd_dists(cents_5d, data_5d)
 
             # Star selection
             st_idx = d_idxs[:N_survived]
 
             # Filter outlier field stars
-            msk = self.filter_pms_plx(
+            msk = self.filter_xy_pms_plx(
                 lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                 plx[st_idx], xy_c, vpd_c, plx_c)
             st_idx = st_idx[msk]
-
-            # plt.suptitle(len(st_idx))
-            # plt.subplot(221)
-            # plt.scatter(lon, lat, alpha=.5)
-            # plt.scatter(lon[st_idx], lat[st_idx], alpha=.5)
-            # plt.subplot(222)
-            # plt.scatter(pmRA, pmDE, alpha=.5)
-            # plt.scatter(pmRA[st_idx], pmDE[st_idx], alpha=.5)
-            # plt.subplot(223)
-            # plt.scatter(BPRP, Gmag, alpha=.5)
-            # plt.scatter(BPRP[st_idx], Gmag[st_idx], alpha=.5)
-            # plt.gca().invert_yaxis()
-            # plt.subplot(224)
-            # plt.hist(plx, alpha=.5, density=True)
-            # plt.hist(plx[st_idx], alpha=.5, density=True)
-            # plt.show()
 
             # Re-estimate centers using the selected stars
             xy_c, vpd_c, plx_c = self.get_5D_center(
@@ -187,66 +139,15 @@ class fastMP:
             zs_vpd = ((c_vpd - c_vpd.mean()) / c_vpd.std()).mean(0)
             zs_plx = ((c_plx - c_plx.mean()) / c_plx.std()).mean()
             if zs_xy.any() > 2:
-                warnings.warn("Center in xy varied substantially", UserWarning)
+                warnings.warn("Center in xy varied by Z_score>2", UserWarning)
             if zs_vpd.any() > 2:
-                warnings.warn("Center in PMs varied substantially",
-                              UserWarning)
+                warnings.warn("Center in PMs varied by Z_score>2", UserWarning)
             if zs_plx.any() > 2:
-                warnings.warn("Center in Plx varied substantially",
-                              UserWarning)
+                warnings.warn("Center in Plx varied by Z_score>2", UserWarning)
 
         probs_final = self.assign_probs(msk_accpt, idx_selected, N_runs)
 
-        # Test for duplicity of clusters or similar problems
-        N_peak = min(N_survived, (probs_final > .5).sum())
-
-        NN = 25 # HARDCODED
-        if N_peak < 4 * NN:  # HARDCODED:
-            return probs_final, N_survived, False
-
-        msk = np.argsort(probs_final[msk_accpt])[::-1][:N_peak]
-        #
-        xys = np.array([lon[msk], lat[msk]]).T
-        dist_xy = cdist(xys, np.array([xy_c])).T[0]
-        # Find nearest neighbors.
-        tree = spatial.cKDTree(xys)
-        inx = tree.query(xys, k=NN)
-        # Max distance to the NN neighbors.
-        NN_dist = inx[0].max(1)
-        # Convert to densities
-        dens = 1. / NN_dist
-        # Normalize
-        dens /= dens.max()
-
-        x_range = np.linspace(0, dist_xy.max(), 10)
-        dens_peak_x, x_min, dens_peak_old = [], 0, np.inf
-        for x_max in x_range[3:]:
-            msk_x = (dist_xy >= x_min) & (dist_xy < x_max)
-            if msk_x.sum() > 1:
-                dens_peak = np.percentile(dens[msk_x], 95)
-                # dens_peak = max(dens[msk_x])
-                if dens_peak > dens_peak_old:
-                    # print(x_min, x_max, dens_peak_old, dens_peak)
-                    dens_peak_x.append((x_max + x_min) * .5)
-            x_min = x_max
-            dens_peak_old = dens_peak
-
-        mc_flag = False
-        if dens_peak_x:
-            warnings.warn("Possible multiple clusters in frame", UserWarning)
-            mc_flag = True
-
-            print(N_survived, (probs_final>.5).sum())
-            plt.subplot(121)
-            plt.scatter(lon[msk], lat[msk])
-            plt.subplot(122)
-            for peak_x in dens_peak_x:
-                plt.axvline(peak_x, c='r', ls='-')
-            plt.scatter(dist_xy, dens)
-            plt.show()
-            # breakpoint()
-
-        return probs_final, N_survived, mc_flag
+        return probs_final, N_survived
 
     def reject_nans(self, data):
         """
@@ -262,15 +163,14 @@ class fastMP:
 
         return msk_accpt, data.T[msk_accpt].T
 
-    def first_filter(self, msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA,
-                     e_pmDE, e_plx, Gmag, BPRP):
+    def first_filter(self, msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx, Gmag, BPRP):
         """
         """
         # Estimate initial center
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
 
         # Remove obvious field stars
-        msk = self.filter_pms_plx(
+        msk = self.filter_xy_pms_plx(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, True)
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
@@ -417,15 +317,13 @@ class fastMP:
 
         return (cx, cy)
 
-    def filter_pms_plx(
-            self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-            ff_flag=False, NN=5):
+    def filter_xy_pms_plx(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, ff_flag=False, NN=5):
         """
         Identify obvious field stars
         """
 
-        # Don't use on the first filter, or for too few or too many stars
-        if ff_flag is False and len(lon) > 10 and len(lon) < 1000:
+        # Don't use on the first filter. Dont use for too few or too many stars
+        if ff_flag is False and len(lon) > 10 and len(lon) < 1000: # HARDCODED
             # Find the distance to the XY center where the density of stars
             # drops below a fixed threshold. Use this as a value to determine
             # the maximum XY radius.
@@ -512,69 +410,94 @@ class fastMP:
 
         self.rads, self.Kest, self.C_thresh_N = rads, Kest, C_thresh_N
 
-    def estimate_nmembs(
-        self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, prob_cut=.5):
+    def estimate_nmembs(self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, prob_cut=.5, N_clust_min=10):
         """
         Estimate the number of cluster members
         """
-        d_pm_plx_idxs = self.get_3d_dists(pmRA, pmDE, plx, vpd_c, plx_c)
+        cents_3d = np.array([list(vpd_c) + [plx_c]])
+        data_3d = np.array([pmRA, pmDE, plx]).T
+        d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
 
         xy = np.array([lon, lat]).T
         N_stars = xy.shape[0]
-        # C_thresh = self.C_thresh_N / self.N_clust
+        C_thresh = self.C_thresh_N / self.N_clust
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        # N_break_count, step_old, idx_survived = 0, 0, []
-        # for step in np.arange(self.N_clust, N_stars, self.N_clust):
+        N_break_count, step_old, idx_survived = 0, 0, []
+        for step in np.arange(self.N_clust, N_stars, self.N_clust):
 
-        for N_clust_surv in (50, 25):
-            C_thresh = self.C_thresh_N / N_clust_surv
-            N_break_count, step_old, idx_survived = 0, 0, []
-            for step in np.arange(N_clust_surv, N_stars, N_clust_surv):
+        # for N_clust_surv in (50, 25):
+            # C_thresh = self.C_thresh_N / N_clust_surv
+            # N_break_count, step_old, idx_survived = 0, 0, []
+            # for step in np.arange(N_clust_surv, N_stars, N_clust_surv):
 
-                msk = d_pm_plx_idxs[step_old:step]
-                C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+            msk = d_pm_plx_idxs[step_old:step]
+            C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
 
-                if not np.isnan(C_s):
-                    # Cluster survived
-                    if C_s >= C_thresh:
-                        idx_survived += list(msk)
-                    else:
-                        # Break condition
-                        N_break_count += 1
-                if N_break_count > self.N_break:
-                    break
-                step_old = step
+            if not np.isnan(C_s):
+                # Cluster survived
+                if C_s >= C_thresh:
+                    idx_survived += list(msk)
+                else:
+                    # Break condition
+                    N_break_count += 1
+            if N_break_count > self.N_break:
+                break
+            step_old = step
 
             if len(idx_survived) > 0:
                 break
 
+        # # Check for other clusters in the dataset
+        # if len(idx_survived) > N_clust_min:
+        #     idx_survived = self.filter_cls_in_frame()
+
+        # Filter by KDE
         N_survived = 0
         if idx_survived:
             cl_probs = self.kde_probs(lon, lat, idx_survived)
             N_survived = int((cl_probs > prob_cut).sum())
 
-        if N_survived < N_clust_surv: #self.N_clust:
+        if N_survived < N_clust_min:
             warnings.warn(
-                f"The estimated number of cluster members is <{N_clust_surv}",
+                f"The estimated number of cluster members is <{N_clust_min}",
                 UserWarning)
-            N_survived = N_clust_surv # self.N_clust
+            N_survived = N_clust_min
 
         return N_survived
 
-    def get_3d_dists(self, pmRA, pmDE, plx, vpd_c, plx_c):
+    def get_Nd_dists(self, cents, data):
         """
         Obtain indexes and distances of stars to the PMs+Plx center
         """
-        all_c = np.array([list(vpd_c) + [plx_c]])
-        # Distances to this center
-        PMsPlx_data = np.array([pmRA, pmDE, plx]).T
-        dist_3d = cdist(PMsPlx_data, all_c).T[0]
+        # Distances to center
+        dist_Nd = cdist(data, cents).T[0]
         # Indexes that sort the distances
-        d_pm_plx_idxs = dist_3d.argsort()
+        d_idxs = dist_Nd.argsort()
 
-        return d_pm_plx_idxs
+        return d_idxs
+
+    def filter_cls_in_frame(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived, extra_cls_dict):
+        """
+        """
+        if extra_cls_dict['run_flag'] is False:
+            return idx_survived
+
+        dists_0 = {}
+        for cent in list(set(extra_cls_dict['centers'])):
+            if cent == 'xy':
+                dists_0['xy'] = 1
+            if cent == 'pms':
+                dists_0['pms'] = 1
+            if cent == 'plx':
+                dists_0['plx'] = 1
+            if cent == 'xy_pms':
+                dists_0['xy_pms'] = 1
+            if cent == 'xy_plx':
+                dists_0['xy_plx'] = 1
+            if cent == 'xy_pms_plx':
+                dists_0['xy_pms_plx'] = 1
 
     def rkfunc(self, xy, rads, Kest):
         """
@@ -671,19 +594,6 @@ class fastMP:
         grs = np.random.normal(0., 1., data_3.shape[1])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
-
-    def get_5d_dists(self, xy_c, vpd_c, plx_c, lon, lat, s_pmRA, s_pmDE,
-                     s_plx):
-        """
-        Obtain the distances of all stars to the center and sort by the
-        smallest value.
-        """
-        all_data = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
-        all_c = np.array([xy_c + vpd_c + [plx_c]])
-        all_dist = cdist(all_data, all_c).T[0]
-        d_idxs = all_dist.argsort()
-
-        return d_idxs
 
     def assign_probs(self, msk_accpt, idx_selected, N_runs):
         """

@@ -1,0 +1,1 @@
+from .fastmp import fastMP
