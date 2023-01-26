@@ -22,6 +22,7 @@ class fastMP:
     """
 
     def __init__(self,
+                 dim_norm=False,
                  # coord_dens_perc=0, #0.05,
                  # PM_rad=10, #5,
                  # PM_cent_rad=100, #0.5,
@@ -34,6 +35,7 @@ class fastMP:
                  fixed_centers=False,
                  centers_ex=None,
                  N_resample=100):
+        self.dim_norm = dim_norm
         self.fix_N_clust = fix_N_clust
         # self.coord_dens_perc = coord_dens_perc
         # self.PM_rad = PM_rad
@@ -101,11 +103,6 @@ class fastMP:
         N_survived, st_idx = self.estimate_nmembs(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        # # Single data normalization
-        # dims_norm = self.get_dims_norm(
-        #     lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, st_idx)
-        # cents_5d = np.array([[.5, .5, .5, .5, .5]])
-
         N_runs, idx_selected, centers = 0, [], [[], [], []]
         for _ in range(self.N_resample + 1):
 
@@ -119,22 +116,21 @@ class fastMP:
             s_pmRA, s_pmDE, s_plx = self.data_sample(
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
-            # Data normalization
-            if st_idx is not None and len(st_idx) > 5:
-                data_5d = self.get_dims_norm(
-                    lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c,
-                    st_idx)
-                cents_5d = np.array([[0., 0., 0., 0., 0.]])
+            if self.dim_norm:
+
+                # Data normalization
+                if st_idx is not None and len(st_idx) > 5:
+                    data_5d = self.get_dims_norm(
+                        lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c,
+                        st_idx)
+                    cents_5d = np.array([[0., 0., 0., 0., 0.]])
+                else:
+                    data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+                    cents_5d = np.array([xy_c + vpd_c + [plx_c]])
             else:
-                data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+                # No data normalization
                 cents_5d = np.array([xy_c + vpd_c + [plx_c]])
-
-            # # Single data normalization
-            # data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T / dims_norm
-
-            # # No data normalization
-            # cents_5d = np.array([xy_c + vpd_c + [plx_c]])
-            # data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+                data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
 
             # Indexes of the sorted 5D distances 5D to the estimated center
             d_idxs = self.get_Nd_dists(cents_5d, data_5d)
@@ -472,7 +468,7 @@ class fastMP:
         pms = np.array([pmRA, pmDE]).T
         pm_rad = cdist(pms, np.array([vpd_c])).T[0]
         msk1 = (plx > 0.5) & (pm_rad / (abs(plx) + 0.0001) < 5) # HARDCODED
-        msk2 = (plx <= 0.5) & (pm_rad < 2) # HARDCODED
+        msk2 = (plx <= 0.5) & (pm_rad < 3) # HARDCODED
         msk = msk1 | msk2
 
         return msk
