@@ -4,17 +4,6 @@ import numpy as np
 from astropy.stats import RipleysKEstimator
 from scipy.spatial.distance import cdist
 from scipy.stats import gaussian_kde
-from scipy import spatial
-import matplotlib.pyplot as plt
-# from .GUMM import GUMMProbs
-
-
-"""
-TODO:
-
-1. Estimate 'plx_rad' from plx error data
-
-"""
 
 
 class fastMP:
@@ -22,12 +11,6 @@ class fastMP:
     """
 
     def __init__(self,
-                 dim_norm=False,
-                 # coord_dens_perc=0, #0.05,
-                 # PM_rad=10, #5,
-                 # PM_cent_rad=100, #0.5,
-                 # plx_rad=100, #0.3,
-                 # pc_rad=10000, #50,
                  fix_N_clust=False,
                  xy_c=None,
                  vpd_c=None,
@@ -35,13 +18,7 @@ class fastMP:
                  fixed_centers=False,
                  centers_ex=None,
                  N_resample=100):
-        self.dim_norm = dim_norm
         self.fix_N_clust = fix_N_clust
-        # self.coord_dens_perc = coord_dens_perc
-        # self.PM_rad = PM_rad
-        # self.PM_cent_rad = PM_cent_rad
-        # self.plx_rad = plx_rad
-        # self.pc_rad = pc_rad
         self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
@@ -53,6 +30,9 @@ class fastMP:
         """
         """
 
+        if self.N_resample < 10:
+            raise ValueError("A minimum of 10 resamples is required")
+
         # Prepare dictionary of parameters for extra clusters in frame (if any)
         self.prep_extra_cl_dict()
 
@@ -60,13 +40,7 @@ class fastMP:
         msk_accpt, X = self.reject_nans(X)
 
         # Unpack input data
-        if self.N_resample >= 10:
-            lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
-        else:
-            raise ValueError("A minimum of 10 resamples is required")
-            # lon, lat, pmRA, pmDE, plx, Gmag, BPRP = X
-            # # Dummy variables
-            # e_pmRA, e_pmDE, e_plx = [np.array([]) for _ in range(3)]
+        lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
 
         # Estimate initial center
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
@@ -77,25 +51,6 @@ class fastMP:
                 msk_accpt, xy_c, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx,
                 e_pmRA, e_pmDE, e_plx)
 
-        # cx, cy = .5 * (max(lon) + min(lon)), .5 * (max(lat) + min(lat))
-        # d_pc = 1000 / plx
-        # l_rad, b_rad = np.deg2rad(lon - cx), np.deg2rad(lat - cy)
-        # x = d_pc * np.sin(l_rad) * np.cos(b_rad)
-        # y = d_pc * np.sin(b_rad)
-        # p_pmRA, p_pmDE = d_pc * pmRA, d_pc * pmDE
-
-        # import astropy.coordinates as coord
-        # import astropy.units as u
-        # from astropy.coordinates import SkyCoord
-        # from astropy.coordinates import Galactic
-        # lon_lat = SkyCoord(l=lon * u.degree, b=lat * u.degree, frame='galactic')
-        # c1 = coord.SkyCoord(
-        #     ra=lon_lat.fk5.ra, dec=lon_lat.fk5.dec,
-        #     distance=(plx*u.mas).to(u.pc, u.parallax()),
-        #     pm_ra_cosdec=pmRA*u.mas/u.yr,
-        #     pm_dec=pmDE*u.mas/u.yr)
-        # breakpoint()
-
         # Prepare Ripley's K data
         self.init_ripley(lon, lat)
 
@@ -105,9 +60,6 @@ class fastMP:
 
         N_runs, idx_selected, centers = 0, [], [[], [], []]
         for _ in range(self.N_resample + 1):
-
-            # print(xy_c, vpd_c, plx_c)
-
             centers[0].append(xy_c)
             centers[1].append(vpd_c)
             centers[2].append(plx_c)
@@ -116,33 +68,18 @@ class fastMP:
             s_pmRA, s_pmDE, s_plx = self.data_sample(
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
-            if self.dim_norm:
-
-                # Data normalization
-                if st_idx is not None and len(st_idx) > 5:
-                    data_5d = self.get_dims_norm(
-                        lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c,
-                        st_idx)
-                    cents_5d = np.array([[0., 0., 0., 0., 0.]])
-                else:
-                    data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
-                    cents_5d = np.array([xy_c + vpd_c + [plx_c]])
-            else:
-                # No data normalization
-                cents_5d = np.array([xy_c + vpd_c + [plx_c]])
-                data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+            # Data normalization
+            data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
+            cents_5d = np.array([xy_c + vpd_c + [plx_c]])
+            if st_idx is not None and len(st_idx) > 5:
+                data_5d, cents_5d = self.get_dims_norm(
+                    data_5d, cents_5d, st_idx)
 
             # Indexes of the sorted 5D distances 5D to the estimated center
             d_idxs = self.get_Nd_dists(cents_5d, data_5d)
 
             # Star selection
             st_idx = d_idxs[:N_survived]
-
-            # # Filter outlier field stars
-            # msk = self.filter_xy_pms_plx(
-            #     lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
-            #     plx[st_idx], xy_c, vpd_c, plx_c)
-            # st_idx = st_idx[msk]
 
             # Filter extra clusters in frame (if any)
             st_idx = self.filter_cls_in_frame(
@@ -373,14 +310,17 @@ class fastMP:
         return (cx, cy)
 
     def first_filter(
-        self, msk_accpt, xy_c, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
-        e_pmDE, e_plx
+        self, msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
+        e_pmDE, e_plx, v_kms_max=5, pm_max=3
     ):
         """
         """
         # Remove obvious field stars
-        msk = self.filter_xy_pms_plx(
-            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, True)
+        pms = np.array([pmRA, pmDE]).T
+        pm_rad = cdist(pms, np.array([vpd_c])).T[0]
+        msk1 = (plx > 0.5) & (pm_rad / (abs(plx) + 0.0001) < v_kms_max)
+        msk2 = (plx <= 0.5) & (pm_rad < pm_max)
+        msk = msk1 | msk2
 
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
@@ -395,83 +335,6 @@ class fastMP:
         msk_accpt[idxs] = True
 
         return msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
-
-    def filter_xy_pms_plx(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-        ff_flag=False, NN=5
-    ):
-        """
-        Identify obvious field stars
-        """
-        # # Don't use on the first filter. Dont use for too few or too many stars
-        # if ff_flag is False and len(lon) > 10 and len(lon) < 1000: # HARDCODED
-        #     # Find the distance to the XY center where the density of stars
-        #     # drops below a fixed threshold. Use this as a value to determine
-        #     # the maximum XY radius.
-        #     xys = np.array([lon, lat]).T
-        #     dist_xy = cdist(xys, np.array([xy_c])).T[0]
-
-        #     # Find nearest neighbors.
-        #     tree = spatial.cKDTree(xys)
-        #     inx = tree.query(xys, k=NN) # HARDCODED
-        #     # Max distance to the NN neighbors.
-        #     NN_dist = inx[0].max(1)
-        #     # Convert to densities
-        #     dens = 1. / NN_dist
-        #     # Normalize
-        #     dens /= dens.max()
-        #     msk_dens = dens <= self.coord_dens_perc
-        #     if any(msk_dens):
-        #         idx = np.argmax(msk_dens)
-        #     else:
-        #         idx = np.argmax(dist_xy)
-        #     msk_xy = (dist_xy < dist_xy[idx])
-
-        #     # # if msk_xy.sum() < 5:
-        #     # if not any(msk_dens):
-        #     #     print("error")
-
-        #     #     print(idx, dist_xy[idx])
-        #     #     ax = plt.subplot(121)
-        #     #     plt.scatter(lon, lat)
-        #     #     circle = plt.Circle(
-        #     #         (np.median(lon), np.median(lat)), dist_xy[idx], color='r',
-        #     #         fill=False)
-        #     #     ax.add_patch(circle)
-        #     #     plt.subplot(122)
-        #     #     plt.scatter(dist_xy, dens)
-        #     #     plt.axhline(0.05, c='r')
-        #     #     plt.axvline(dist_xy[idx], c='r')
-        #     #     plt.show()
-        #     #     breakpoint()
-
-        # else:
-        #     msk_xy = np.full(len(pmRA), True)
-
-        # # Hard PMs limit
-        # pms = np.array([pmRA, pmDE]).T
-        # dist_pm = cdist(pms, np.array([vpd_c])).T[0]
-        # pmRad = self.PM_rad  #max(self.PM_rad, self.PM_cent_rad * abs(vpd_c[0]))
-
-        # # Hard Plx limit
-        # d_pc = 1000 / plx_c
-        # plx_min = 1000 / (d_pc + self.pc_rad)
-        # plx_max = max(.05, 1000 / (d_pc - self.pc_rad))  # HARDCODED
-        # plxRad_min = max(self.plx_rad, plx_c - plx_min)
-        # plxRad_max = max(self.plx_rad, plx_max - plx_c)
-
-        # msk = (dist_pm < pmRad) & (plx - plx_c < plxRad_max)\
-        #     & (plx_c - plx < plxRad_min) & msk_xy
-
-
-        # 
-        pms = np.array([pmRA, pmDE]).T
-        pm_rad = cdist(pms, np.array([vpd_c])).T[0]
-        msk1 = (plx > 0.5) & (pm_rad / (abs(plx) + 0.0001) < 5) # HARDCODED
-        msk2 = (plx <= 0.5) & (pm_rad < 3) # HARDCODED
-        msk = msk1 | msk2
-
-        return msk
 
     def init_ripley(self, lon, lat):
         """
@@ -501,7 +364,7 @@ class fastMP:
 
     def estimate_nmembs(
         self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-        N_clust=50, N_clust_min=10, N_break=5, prob_cut=.5
+        N_clust=50, N_clust_min=10, N_extra=5, N_break=5, prob_cut=.5
     ):
         """
         Estimate the number of cluster members
@@ -521,11 +384,9 @@ class fastMP:
             """
             """
             C_thresh = self.C_thresh_N / N_clust_surv
-
             idx_survived = []
             N_break_count, step_old = 0, 0
             for step in np.arange(N_clust_surv, N_stars, N_clust_surv):
-
                 msk = d_pm_plx_idxs[step_old:step]
                 C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
                 if not np.isnan(C_s):
@@ -538,7 +399,6 @@ class fastMP:
                 if N_break_count > N_break:
                     break
                 step_old = step
-
             return idx_survived
 
         # Select those clusters where the stars are different enough from a
@@ -547,7 +407,7 @@ class fastMP:
         if not idx_survived:
             # If the default clustering number did not work, try a few
             # more values with an increasing number of cluster stars
-            for _ in range(5): # HARDCODED
+            for _ in range(N_extra):
                 N_clust_surv = int(N_clust + (_ + 1) * N_clust_min)
                 idx_survived = core(N_clust_surv)
                 # Break out when (if) any value selected stars
@@ -565,17 +425,6 @@ class fastMP:
         idx_survived = self.filter_cls_in_frame(
             lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk], xy_c, vpd_c,
             plx_c, msk)
-
-        # # Filter by GUMM in PMs
-        # gumm_p = GUMMProbs(np.array([pmRA[idx_survived], pmDE[idx_survived]]))
-        # # Create the percentiles vs probabilities array.
-        # percent = np.arange(1, 99, 1)
-        # perc_probs = np.array([percent, np.percentile(gumm_p, percent)]).T
-        # # Find 'elbow' where the probabilities start climbing from ~0.
-        # prob_cut0 = self.rotate(perc_probs)
-        # prob_cut = min(0.5, prob_cut0)
-        # # N_survived = (gumm_p > prob_cut).sum()
-        # idx_survived = idx_survived[gumm_p > prob_cut]
 
         # IDs of stars that survived Ripley's filter but belong to extra
         # clusters in the frame
@@ -596,80 +445,6 @@ class fastMP:
             return N_clust_min, None
 
         return N_survived, idx_survived
-
-    def get_dims_norm(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk
-    ):
-        """
-        Normalize dimensions using twice the median of the selected probable
-        members.
-        """
-        # dims_norm = []
-        # dim_centers = (xy_c[0], xy_c[1], vpd_c[0], vpd_c[1], plx_c)
-        # for i, dim in enumerate((lon, lat, pmRA, pmDE, plx)):
-        #     dims_norm.append(2 * np.median(abs(dim[msk] - dim_centers[i])))
-
-        data = np.array([lon, lat, pmRA, pmDE, plx]).T
-
-        # dims_norm = 2 * np.median(data[msk], 0)
-        # return dims_norm
-
-        cents_5d = np.array(xy_c + vpd_c + [plx_c])
-        data_mvd = data - cents_5d
-        dims_norm = 2 * np.median(abs(data_mvd[msk]), 0)
-        data_norm = data_mvd / dims_norm
-
-        return data_norm
-
-    def get_Nd_dists(self, cents, data, dists_flag=False):
-        """
-        Obtain indexes and distances of stars to the PMs+Plx center
-        """
-        # Distances to center
-        dist_Nd = cdist(data, cents).T[0]
-        if dists_flag:
-            return dist_Nd
-
-        # Indexes that sort the distances
-        d_idxs = dist_Nd.argsort()
-
-        return d_idxs
-
-    def filter_cls_in_frame(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived
-    ):
-        """
-        """
-        if self.extra_cls_dict['run_flag'] is False:
-            return idx_survived
-
-        data = np.array([lon, lat, pmRA, pmDE, plx])
-        cents = np.array([xy_c + vpd_c + [plx_c]])
-
-        # Find the distances to the center for all the combinations of data
-        # dimensions in the extra clusters in frame
-        dists = {}
-        for dims in list(set(self.extra_cls_dict['dim_keys'])):
-            msk = self.dims_msk[dims]
-            dists[dims] = self.get_Nd_dists(
-                cents[:, msk], data[msk, :].T, True)
-
-        #
-        msk_d = np.full(len(idx_survived), True)
-        for i, cent_ex in enumerate(self.extra_cls_dict['centers']):
-            dims_ex = self.extra_cls_dict['dim_keys'][i]
-            msk = self.dims_msk[dims_ex]
-            dists_ex = self.get_Nd_dists(
-                np.array([cent_ex]), data[msk, :].T, True)
-
-            # If the distance to the selected cluster center is smaller than
-            # the distance to this extra cluster's center, keep the star
-            msk_d = msk_d & (dists[dims_ex] <= dists_ex)
-
-        # Never return less than 10 stars
-        if msk_d.sum() < 10:
-            return idx_survived
-        return idx_survived[msk_d]
 
     def rkfunc(self, xy, rads, Kest):
         """
@@ -769,13 +544,73 @@ class fastMP:
         """
         Gaussian random sample
         """
-        # if self.N_resample == 0:
-        #     return pmRA, pmDE, plx
-
         data_3 = np.array([pmRA, pmDE, plx])
         grs = np.random.normal(0., 1., data_3.shape[1])
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
+
+    def get_dims_norm(self, data_5d, cents_5d, msk):
+        """
+        Normalize dimensions using twice the median of the selected probable
+        members.
+        """
+        data_mvd = data_5d - cents_5d
+        dims_norm = 2 * np.median(abs(data_mvd[msk]), 0)
+        data_norm = data_mvd / dims_norm
+
+        cents_5d = np.array([[0., 0., 0., 0., 0.]])
+
+        return data_norm, cents_5d
+
+    def get_Nd_dists(self, cents, data, dists_flag=False):
+        """
+        Obtain indexes and distances of stars to the PMs+Plx center
+        """
+        # Distances to center
+        dist_Nd = cdist(data, cents).T[0]
+        if dists_flag:
+            return dist_Nd
+
+        # Indexes that sort the distances
+        d_idxs = dist_Nd.argsort()
+
+        return d_idxs
+
+    def filter_cls_in_frame(
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived
+    ):
+        """
+        """
+        if self.extra_cls_dict['run_flag'] is False:
+            return idx_survived
+
+        data = np.array([lon, lat, pmRA, pmDE, plx])
+        cents = np.array([xy_c + vpd_c + [plx_c]])
+
+        # Find the distances to the center for all the combinations of data
+        # dimensions in the extra clusters in frame
+        dists = {}
+        for dims in list(set(self.extra_cls_dict['dim_keys'])):
+            msk = self.dims_msk[dims]
+            dists[dims] = self.get_Nd_dists(
+                cents[:, msk], data[msk, :].T, True)
+
+        #
+        msk_d = np.full(len(idx_survived), True)
+        for i, cent_ex in enumerate(self.extra_cls_dict['centers']):
+            dims_ex = self.extra_cls_dict['dim_keys'][i]
+            msk = self.dims_msk[dims_ex]
+            dists_ex = self.get_Nd_dists(
+                np.array([cent_ex]), data[msk, :].T, True)
+
+            # If the distance to the selected cluster center is smaller than
+            # the distance to this extra cluster's center, keep the star
+            msk_d = msk_d & (dists[dims_ex] <= dists_ex)
+
+        # Never return less than 10 stars
+        if msk_d.sum() < 10:
+            return idx_survived
+        return idx_survived[msk_d]
 
     def assign_probs(self, msk_accpt, idx_selected, N_runs):
         """
