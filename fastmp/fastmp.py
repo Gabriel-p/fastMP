@@ -2,8 +2,9 @@
 import warnings
 import numpy as np
 from astropy.stats import RipleysKEstimator
-from scipy.spatial.distance import cdist
+from scipy import spatial
 from scipy.stats import gaussian_kde
+import matplotlib.pyplot as plt
 
 
 class fastMP:
@@ -42,13 +43,23 @@ class fastMP:
         # Unpack input data
         lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
 
+        import time as tm
+
         # Estimate initial center
+        s = tm.time()
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
+        t1 = tm.time() - s
+
+        s = tm.time()
+        xy_c2, vpd_c2, plx_c2 = self.get_5D_center_2(lon, lat, pmRA, pmDE, plx)
+        t2 = tm.time() - s
+
+        return len(lon), xy_c, vpd_c, plx_c, xy_c2, vpd_c2, plx_c2, t1, t2
 
         # Remove the most obvious field stars to speed up the process
         msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
             self.first_filter(
-                msk_accpt, xy_c, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx,
+                msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx,
                 e_pmRA, e_pmDE, e_plx)
 
         # Prepare Ripley's K data
@@ -69,11 +80,8 @@ class fastMP:
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
             # Data normalization
-            data_5d = np.array([lon, lat, s_pmRA, s_pmDE, s_plx]).T
-            cents_5d = np.array([xy_c + vpd_c + [plx_c]])
-            if st_idx is not None and len(st_idx) > 5:
-                data_5d, cents_5d = self.get_dims_norm(
-                    data_5d, cents_5d, st_idx)
+            data_5d, cents_5d = self.get_dims_norm(
+                lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c, st_idx)
 
             # Indexes of the sorted 5D distances 5D to the estimated center
             d_idxs = self.get_Nd_dists(cents_5d, data_5d)
@@ -182,11 +190,70 @@ class fastMP:
 
         return msk_accpt, data.T[msk_accpt].T
 
+    def get_5D_center_2(self, lon, lat, pmRA, pmDE, plx):
+        """
+        """
+        Nmax, Ndens = 50000, 5
+        if len(lon) > Nmax:
+            i = np.random.choice(len(lon), Nmax, replace=False)
+            data = np.array([lon[i], lat[i], pmRA[i], pmDE[i], plx[i]]).T
+        else:
+            data = np.array([lon, lat, pmRA, pmDE, plx]).T
+        tree = spatial.cKDTree(data)
+        inx = tree.query(data, k=Ndens + 1)
+        NN_dist = inx[0].max(1)
+        # Convert to densities
+        dens = 1. / NN_dist
+        # Sort by largest density
+        idxs = np.argsort(-dens)
+
+        # Use star  with largest density
+        cent = np.array([data[idxs[0]]])[0]
+
+        # # Use median of 10 stars with largest densities
+        # cent = np.median(data[idxs[:10]], 0)
+
+        x_c, y_c, pmra_c, pmde_c, plx_c = cent
+
+        return [x_c, y_c], [pmra_c, pmde_c], plx_c
+
+        # for _ in range(10):
+
+        #     data = np.array([lon, lat, pmRA, pmDE, plx]).T
+        #     tree = spatial.cKDTree(data)
+        #     inx = tree.query(data, k=5 + 1)
+        #     NN_dist = inx[0].max(1)
+        #     # Convert to densities
+        #     dens = 1. / NN_dist
+        #     # Sort by largest density
+        #     idxs = np.argsort(-dens)
+
+        #     # Distances to point with largest density
+        #     cent = np.array([data[idxs[0]]])
+        #     idx = self.get_Nd_dists(cent, data)
+        #     # Remove 10% of points with largest distances to center
+        #     data = data[:idx[int(data.shape[0] * .1)], :]
+
+        # x_c, y_c = cent[0][0], cent[0][1]
+        # pmra_c, pmde_c = cent[0][2], cent[0][3]
+        # plx_c = cent[0][4]
+
+        return [x_c, y_c], [pmra_c, pmde_c], plx_c
+
     def get_5D_center(self, lon, lat, pmRA, pmDE, plx, N_cent=200):
         """
-        Estimate the 5-dimensional center of the cluster.
+        Estimate the 5-dimensional center of the cluster. Steps:
+
+        1. Estimate the center in PMs (the value can be given as input)
+        2. Using this center with any other given center, obtain the
+           'N_cent' stars closest to the combined center.
+        3. Estimate the 5-dimensional final center
 
         Possible scenarios:
+
+        1. vpd_c=None + xy_c=None + plx_c=None
+          - Estimate vpd_c
+
 
         A. vpd_c=None
           1. Estimate vpd_c
@@ -204,36 +271,53 @@ class fastMP:
 
         3. Estimate 5D center with KDE
 
-        N_cent: how many stars are used to estimate the center.
+        N_cent: how many stars are used to estimate the KDE center.
 
         """
-        # (Re)estimate VPD center
-        vpd_c = self.get_pms_center(pmRA, pmDE)
+        if type(self.fix_N_clust) in (int, float):
+            N_cent = self.fix_N_clust
 
-        # Distances to center
-        # AB1
-        if self.xy_c is None and self.plx_c is None:
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2
-        # AB2
-        elif self.xy_c is None and self.plx_c is not None:
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (plx - self.plx_c)**2
-        # AB3
+        # Distances to xy_c+plx_c centers, if any was given
+        cent = np.array([])
+        if self.xy_c is None and self.plx_c is not None:
+            cent = np.array([[self.plx_c]])
+            data = np.array([plx]).T
         elif self.xy_c is not None and self.plx_c is None:
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (lon - self.xy_c[0])**2 + (lat - self.xy_c[1])**2
-        # AB4
+            cent = np.array([self.xy_c])
+            data = np.array([lon, lat]).T
         elif self.xy_c is not None and self.plx_c is not None:
-            dist = (pmRA - vpd_c[0])**2 + (pmDE - vpd_c[1])**2\
-                + (lon - self.xy_c[0])**2 + (lat - self.xy_c[1])**2\
-                + (plx - self.plx_c)**2
+            cent = np.array([list(self.xy_c) + [self.plx_c]])
+            data = np.array([lon, lat, plx]).T
+
+        if cent.any():
+            # Closest stars to the selected center
+            idx = self.get_Nd_dists(cent, data)[:N_cent]
+            pmRA_i, pmDE_i = pmRA[idx], pmDE[idx]
+        else:
+            pmRA_i, pmDE_i = pmRA, pmDE
+
+        # (Re)estimate VPD center
+        vpd_c = self.get_pms_center(pmRA_i, pmDE_i)
+
+        # Distances to centers using the vpd_c and other available data
+        if self.xy_c is None and self.plx_c is None:
+            cent = np.array([vpd_c])
+            data = np.array([pmRA, pmDE]).T
+        elif self.xy_c is None and self.plx_c is not None:
+            cent = np.array([vpd_c + [self.plx_c]])
+            data = np.array([pmRA, pmDE, plx]).T
+        elif self.xy_c is not None and self.plx_c is None:
+            cent = np.array([list(self.xy_c) + vpd_c])
+            data = np.array([lon, lat, pmRA, pmDE]).T
+        elif self.xy_c is not None and self.plx_c is not None:
+            cent = np.array([list(self.xy_c) + vpd_c + [self.plx_c]])
+            data = np.array([lon, lat, pmRA, pmDE, plx]).T
 
         # Closest stars to the selected center
-        idx = dist.argsort()[:N_cent]  # HARDCODED
+        idx = self.get_Nd_dists(cent, data)[:N_cent]
 
         # Estimate 5D center with KDE
-        d1, d2, d3, d4, d5 = lon[idx], lat[idx], pmRA[idx], pmDE[idx], plx[idx]
-        d1_5 = np.vstack([d1, d2, d3, d4, d5])
+        d1_5 = np.vstack([lon[idx], lat[idx], pmRA[idx], pmDE[idx], plx[idx]])
         try:
             # Define Gaussian KDE
             kde = gaussian_kde(d1_5)
@@ -241,21 +325,27 @@ class fastMP:
             density = kde(d1_5)
             # Extract new centers as those associated to the maximum density
             x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
-        except:
+        except Exception:
             warnings.warn("Could not estimate the KDE 5D center", UserWarning)
-            x_c, y_c, pmra_c, pmde_c, plx_c = self.xy_c[0], self.xy_c[1],\
-                vpd_c[0], vpd_c[1], self.plx_c
-        vpd_c = (pmra_c, pmde_c)
+            pmra_c, pmde_c = vpd_c[0], vpd_c[1]
+            if self.xy_c is not None:
+                x_c, y_c = self.xy_c[0], self.xy_c[1]
+            elif self.plx_c is not None:
+                plx_c = self.plx_c
+            elif self.xy_c is None:
+                x_c, y_c = np.median(lon[idx]), np.median(lat[idx])
+            elif self.plx_c is None:
+                plx_c = np.median(plx[idx])
 
         if self.fixed_centers is True:
             if self.xy_c is not None:
                 [x_c, y_c] = self.xy_c
             if self.vpd_c is not None:
-                vpd_c = self.vpd_c
+                pmra_c, pmde_c = self.vpd_c
             if self.plx_c is not None:
                 plx_c = self.plx_c
 
-        return [x_c, y_c], list(vpd_c), plx_c
+        return [x_c, y_c], [pmra_c, pmde_c], plx_c
 
     def get_pms_center(self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10):
         """
@@ -263,6 +353,7 @@ class fastMP:
         vpd_mc = self.vpd_c
 
         vpd = np.array([pmRA, pmDE]).T
+
         # Center in PMs space
         cx, cxm = None, None
         for _ in range(N_zoom):
@@ -307,7 +398,7 @@ class fastMP:
                 cx, cy = vpd_mc
                 raise Exception("Could not estimate the PMs center value")
 
-        return (cx, cy)
+        return [cx, cy]
 
     def first_filter(
         self, msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
@@ -317,7 +408,7 @@ class fastMP:
         """
         # Remove obvious field stars
         pms = np.array([pmRA, pmDE]).T
-        pm_rad = cdist(pms, np.array([vpd_c])).T[0]
+        pm_rad = spatial.distance.cdist(pms, np.array([vpd_c])).T[0]
         msk1 = (plx > 0.5) & (pm_rad / (abs(plx) + 0.0001) < v_kms_max)
         msk2 = (plx <= 0.5) & (pm_rad < pm_max)
         msk = msk1 | msk2
@@ -549,11 +640,19 @@ class fastMP:
         data_err = np.array([e_pmRA, e_pmDE, e_plx])
         return data_3 + grs * data_err
 
-    def get_dims_norm(self, data_5d, cents_5d, msk):
+    def get_dims_norm(
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk
+    ):
         """
         Normalize dimensions using twice the median of the selected probable
         members.
         """
+        data_5d = np.array([lon, lat, pmRA, pmDE, plx]).T
+        cents_5d = np.array([xy_c + vpd_c + [plx_c]])
+
+        if msk is None or len(msk) < 5:
+            return data_5d, cents_5d
+
         data_mvd = data_5d - cents_5d
         dims_norm = 2 * np.median(abs(data_mvd[msk]), 0)
         data_norm = data_mvd / dims_norm
@@ -567,7 +666,7 @@ class fastMP:
         Obtain indexes and distances of stars to the PMs+Plx center
         """
         # Distances to center
-        dist_Nd = cdist(data, cents).T[0]
+        dist_Nd = spatial.distance.cdist(data, cents).T[0]
         if dists_flag:
             return dist_Nd
 
