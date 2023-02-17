@@ -193,50 +193,133 @@ class fastMP:
     def get_5D_center_2(self, lon, lat, pmRA, pmDE, plx):
         """
         """
-        Nmax, Ndens = 50000, 5
-        if len(lon) > Nmax:
-            i = np.random.choice(len(lon), Nmax, replace=False)
-            data = np.array([lon[i], lat[i], pmRA[i], pmDE[i], plx[i]]).T
-        else:
-            data = np.array([lon, lat, pmRA, pmDE, plx]).T
-        tree = spatial.cKDTree(data)
-        inx = tree.query(data, k=Ndens + 1)
-        NN_dist = inx[0].max(1)
-        # Convert to densities
-        dens = 1. / NN_dist
-        # Sort by largest density
-        idxs = np.argsort(-dens)
+        if self.fixed_centers is True and self.xy_c is not None\
+                and self.vpd_c is not None and self.plx_c is not None:
+            [x_c, y_c] = self.xy_c
+            pmra_c, pmde_c = self.vpd_c
+            plx_c = self.plx_c
 
-        # Use star  with largest density
-        cent = np.array([data[idxs[0]]])[0]
+        def data_sample(lon, lat, pmRA, pmDE, plx, Nmax=10000):
+            """
+            """
+            if len(lon) > Nmax:
+                i = np.random.choice(len(lon), Nmax, replace=False)
+                data = np.array([lon[i], lat[i], pmRA[i], pmDE[i], plx[i]]).T
+            else:
+                data = np.array([lon, lat, pmRA, pmDE, plx]).T
+            return data
 
-        # # Use median of 10 stars with largest densities
-        # cent = np.median(data[idxs[:10]], 0)
+        def max_dens_center(data, Ndens=25):
+            """
+            """
+            # data = data/np.linalg.norm(data, axis=0)
 
-        x_c, y_c, pmra_c, pmde_c, plx_c = cent
+            tree = spatial.cKDTree(data)
+            inx = tree.query(data, k=Ndens + 1)
+            # NN_dist = inx[0].max(1)
+            NN_dist = inx[0][:, int(Ndens / 2)]
+            # Convert to densities
+            dens = 1. / NN_dist
+            # Sort by largest density
+            idxs = np.argsort(-dens)
 
-        return [x_c, y_c], [pmra_c, pmde_c], plx_c
+            # Use the star with the largest density
+            cent = np.array([data[idxs[0]]])[0]
+            # # Use median of 10 stars with largest densities
+            # cent = np.median(data[idxs[:10]], 0)
 
-        # for _ in range(10):
+            x_c, y_c, pmra_c, pmde_c, plx_c = cent
 
-        #     data = np.array([lon, lat, pmRA, pmDE, plx]).T
-        #     tree = spatial.cKDTree(data)
-        #     inx = tree.query(data, k=5 + 1)
-        #     NN_dist = inx[0].max(1)
-        #     # Convert to densities
-        #     dens = 1. / NN_dist
-        #     # Sort by largest density
-        #     idxs = np.argsort(-dens)
+            return dens, x_c, y_c, pmra_c, pmde_c, plx_c
 
-        #     # Distances to point with largest density
-        #     cent = np.array([data[idxs[0]]])
-        #     idx = self.get_Nd_dists(cent, data)
-        #     # Remove 10% of points with largest distances to center
-        #     data = data[:idx[int(data.shape[0] * .1)], :]
+        data = data_sample(lon, lat, pmRA, pmDE, plx)
+        dens, x_c, y_c, pmra_c, pmde_c, plx_c = max_dens_center(data)
 
-        # x_c, y_c = cent[0][0], cent[0][1]
-        # pmra_c, pmde_c = cent[0][2], cent[0][3]
-        # plx_c = cent[0][4]
+        if self.xy_c is not None:
+
+            x_c, y_c = self.xy_c
+            c_dist = spatial.distance.cdist(data, [[x_c, y_c, pmra_c, pmde_c, plx_c]]).T[0]
+            d_01 = np.sqrt((c_dist / c_dist.max() - 0)**2
+                           + (dens / dens.max() - 1)**2)
+            msk = d_01 < .7
+            data = data[msk]
+            dens, x_c, y_c, pmra_c, pmde_c, plx_c = max_dens_center(data)
+            print(x_c, y_c, pmra_c, pmde_c, plx_c)
+
+            x_c, y_c = self.xy_c
+            c_dist = spatial.distance.cdist(data, [[x_c, y_c, pmra_c, pmde_c, plx_c]]).T[0]
+            d_01 = np.sqrt((c_dist / c_dist.max() - 0)**2
+                           + (dens / dens.max() - 1)**2)
+            msk = d_01 < .7
+            data = data[msk]
+            dens, x_c, y_c, pmra_c, pmde_c, plx_c = max_dens_center(data)
+            print(x_c, y_c, pmra_c, pmde_c, plx_c)
+            breakpoint()
+
+            # N_old, N_new = len(data), 0
+            # while len(data) > 100 and N_old != N_new:
+
+            #     # c_dist = spatial.distance.cdist(data[:, :2], [self.xy_c]).T[0]
+            #     # c_dist = spatial.distance.cdist(data, [list(self.xy_c) + [pmra_c, pmde_c, plx_c]]).T[0]
+            #     c_dist = spatial.distance.cdist(data, [[x_c, y_c, pmra_c, pmde_c, plx_c]]).T[0]
+            #     dens = max_dens_center(data)[0]
+            #     d_01 = np.sqrt((c_dist / c_dist.max() - 0)**2
+            #                    + (dens / dens.max() - 1)**2)
+            #     # ii = np.argsort(d_01)[:10]
+            #     # x_c, y_c, pmra_c, pmde_c, plx_c = np.median(data[ii], 0)
+
+            #     msk = d_01 < .7
+            #     ii = np.argmin(d_01[msk])
+            #     x_c, y_c, pmra_c, pmde_c, plx_c = data[msk][ii]
+            #     print(x_c, y_c, pmra_c, pmde_c, plx_c)
+
+            #     N_old = N_new
+            #     N_new = msk.sum()
+
+            #     # msk = np.argsort(d_01[msk])[:25]
+            #     plt.subplot(131)
+            #     plt.title(msk.sum())
+            #     plt.scatter(data.T[0], data.T[1], alpha=.7)
+            #     plt.scatter(data.T[0][msk], data.T[1][msk], alpha=.7)
+            #     plt.scatter(x_c, y_c, c='k', marker='x', s=100, lw=2)
+            #     plt.subplot(132)
+            #     plt.scatter(data.T[2], data.T[3], alpha=.7)
+            #     plt.scatter(data.T[2][msk], data.T[3][msk], alpha=.7)
+            #     plt.scatter(pmra_c, pmde_c, c='k', marker='x', s=100, lw=2)
+            #     plt.subplot(133)
+            #     plt.scatter(data.T[4], data.T[3], alpha=.7)
+            #     plt.scatter(data.T[4][msk], data.T[3][msk], alpha=.7)
+            #     plt.scatter(plx_c, pmde_c, c='k', marker='x', s=100, lw=2)
+            #     plt.show()
+
+            #     data = data[msk]
+
+            if self.fixed_centers is True:
+                x_c, y_c = self.xy_c
+            # else:
+                # while len(data) > 100:
+                # c_dist = spatial.distance.cdist(data[:, :2], [self.xy_c]).T[0]
+                # d_01 = np.sqrt((c_dist / c_dist.max() - 0)**2
+                #                + (dens / dens.max() - 1)**2)
+
+                # idx = np.argmin(d_01)
+                # print(len(data), data[:, :2][idx])
+                # msk = d_01 < 0.7
+                # data = data_sample(*data[msk].T)
+                # dens = dens[msk]
+
+                # idx = np.argmin(d_01)
+                # idxs = np.argsort(np.sqrt(
+                #     (c_dist / c_dist.max() - 0)**2
+                #     + (dens / dens.max() - 1)**2))[:10]
+                # x_c, y_c = np.median(data[:, :2][idxs], 0)
+                # x_c, y_c = data[:, :2][idx]
+                # print(data[:, :2][idx])
+
+        # if self.vpd_c is not None:
+        #     pmra_c, pmde_c = self.vpd_c
+        # if self.plx_c is not None:
+        #     plx_c = self.plx_c
 
         return [x_c, y_c], [pmra_c, pmde_c], plx_c
 
