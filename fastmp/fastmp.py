@@ -58,11 +58,8 @@ class fastMP:
         N_survived, st_idx = self.estimate_nmembs(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        N_runs, idx_selected, centers = 0, [], [[], [], []]
+        N_runs, idx_selected = 0, []
         for _ in range(self.N_resample + 1):
-            centers[0].append(xy_c)
-            centers[1].append(vpd_c)
-            centers[2].append(plx_c)
 
             # Sample data
             s_pmRA, s_pmDE, s_plx = self.data_sample(
@@ -92,26 +89,8 @@ class fastMP:
                 idx_selected += list(st_idx)
                 N_runs += 1
 
-        # Check to see if any center moved around
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            c_xy, c_vpd, c_plx = [np.array(_) for _ in centers]
-            zs_xy = ((c_xy - c_xy.mean()) / c_xy.std()).mean(0)
-            zs_vpd = ((c_vpd - c_vpd.mean()) / c_vpd.std()).mean(0)
-            zs_plx = ((c_plx - c_plx.mean()) / c_plx.std()).mean()
-            if zs_xy.any() > 2:
-                warnings.warn("Center in xy varied by Z_score>2", UserWarning)
-            if zs_vpd.any() > 2:
-                warnings.warn("Center in PMs varied by Z_score>2", UserWarning)
-            if zs_plx.any() > 2:
-                warnings.warn("Center in Plx varied by Z_score>2", UserWarning)
-
+        # Assign final probabilities
         probs_final = self.assign_probs(msk_accpt, idx_selected, N_runs)
-
-        if abs(N_survived - (probs_final > .5).sum()) / N_survived > .5:
-            warnings.warn(
-                "The estimated number of members differ\nmore than 50% with "
-                + "stars with P>0.5", UserWarning)
 
         return probs_final, N_survived
 
