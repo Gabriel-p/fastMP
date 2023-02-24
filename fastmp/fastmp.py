@@ -389,7 +389,7 @@ class fastMP:
 
     def estimate_nmembs(
         self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-        N_clust=50, N_clust_min=10, N_extra=5, N_break=5, prob_cut=.5
+        N_clust_min=10, N_clust_max=5000, prob_cut=.5
     ):
         """
         Estimate the number of cluster members
@@ -398,10 +398,58 @@ class fastMP:
             N_survived, st_idx = int(self.fix_N_clust), None
             return N_survived, st_idx
 
+        idx_survived = self.ripley_survive(
+            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust_min)
+
+        if len(idx_survived) > N_clust_max:
+            warnings.warn(
+                f"The estimated number of cluster members is >{N_clust_max}",
+                UserWarning)
+            return N_clust_max, None
+
+        if len(idx_survived) < N_clust_min:
+            warnings.warn(
+                f"The estimated number of cluster members is <{N_clust_min}",
+                UserWarning)
+            return N_clust_min, None
+
+        # Filter extra clusters in frame (if any)
+        msk = np.array(idx_survived)
+        idx_survived = self.filter_cls_in_frame(
+            lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk], xy_c, vpd_c,
+            plx_c, msk)
+
+        # IDs of stars that survived Ripley's filter but belong to extra
+        # clusters in the frame
+        ex_cls_ids = np.array(list(
+            set(msk).symmetric_difference(set(idx_survived))))
+        # Filter by KDE
+        kde_probs = self.kde_probs(lon, lat, idx_survived, ex_cls_ids)
+        N_survived = len(idx_survived)
+        if kde_probs is not None:
+            msk = kde_probs > prob_cut
+            N_survived = min(N_survived, msk.sum())
+            idx_survived = idx_survived[msk]
+
+        if N_survived < N_clust_min:
+            warnings.warn(
+                f"The estimated number of cluster members is <{N_clust_min}",
+                UserWarning)
+            return N_clust_min, None
+
+        return N_survived, idx_survived
+
+    def ripley_survive(
+        self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust_min,
+        N_clust=50, N_extra=5, N_break=5
+    ):
+        """
+        Process data to identify the indexes of stars that survive the
+        Ripley's K filter
+        """
         cents_3d = np.array([list(vpd_c) + [plx_c]])
         data_3d = np.array([pmRA, pmDE, plx]).T
         d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
-
         xy = np.array([lon, lat]).T
         N_stars = xy.shape[0]
 
@@ -439,37 +487,7 @@ class fastMP:
                 if len(idx_survived) > 0:
                     break
 
-        if len(idx_survived) < N_clust_min:
-            warnings.warn(
-                f"The estimated number of cluster members is <{N_clust_min}",
-                UserWarning)
-            return N_clust_min, None
-
-        # Filter extra clusters in frame (if any)
-        msk = np.array(idx_survived)
-        idx_survived = self.filter_cls_in_frame(
-            lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk], xy_c, vpd_c,
-            plx_c, msk)
-
-        # IDs of stars that survived Ripley's filter but belong to extra
-        # clusters in the frame
-        ex_cls_ids = np.array(list(
-            set(msk).symmetric_difference(set(idx_survived))))
-        # Filter by KDE
-        kde_probs = self.kde_probs(lon, lat, idx_survived, ex_cls_ids)
-        N_survived = len(idx_survived)
-        if kde_probs is not None:
-            msk = kde_probs > prob_cut
-            N_survived = min(N_survived, msk.sum())
-            idx_survived = idx_survived[msk]
-
-        if N_survived < N_clust_min:
-            warnings.warn(
-                f"The estimated number of cluster members is <{N_clust_min}",
-                UserWarning)
-            return N_clust_min, None
-
-        return N_survived, idx_survived
+        return idx_survived
 
     def rkfunc(self, xy, rads, Kest):
         """
