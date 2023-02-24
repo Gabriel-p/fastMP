@@ -334,26 +334,6 @@ class fastMP:
         x_c, y_c, pmra_c, pmde_c, plx_c = cent
         return x_c, y_c, pmra_c, pmde_c, plx_c
 
-    # def get_kde_center(self, lon, lat, pmRA, pmDE, plx):
-    #     """
-    #     Estimate 5D center with KDE
-    #     """
-    #     try:
-    #         d1_5 = np.vstack([lon, lat, pmRA, pmDE, plx])
-    #         # Define Gaussian KDE
-    #         kde = gaussian_kde(d1_5)
-    #         # Evaluate in the selected closest stars to the center
-    #         density = kde(d1_5)
-    #         # Extract new centers as those associated to the maximum density
-    #         x_c, y_c, pmra_c, pmde_c, plx_c = d1_5[:, density.argmax()]
-    #     except Exception:
-    #         warnings.warn("Could not estimate the KDE 5D center", UserWarning)
-    #         x_c, y_c = np.median(lon), np.median(lat)
-    #         pmra_c, pmde_c = np.median(pmRA), np.median(pmDE)
-    #         plx_c = np.median(plx)
-
-    #     return x_c, y_c, pmra_c, pmde_c, plx_c
-
     def first_filter(
         self, msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
         e_pmDE, e_plx, v_kms_max=5, pm_max=3
