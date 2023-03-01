@@ -17,14 +17,16 @@ class fastMP:
                  fix_N_clust=False,
                  fixed_centers=False,
                  centers_ex=None,
-                 N_resample=100):
+                 N_resample=100,
+                 N_clust_max=25000):
         self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
         self.fix_N_clust = fix_N_clust
         self.fixed_centers = fixed_centers
         self.centers_ex = centers_ex
-        self.N_resample = N_resample
+        self.N_resample = int(N_resample)
+        self.N_clust_max = int(N_clust_max)
 
     def fit(self, X):
         """
@@ -37,7 +39,8 @@ class fastMP:
         self.prep_extra_cl_dict()
 
         # Remove nans
-        msk_accpt, X = self.reject_nans(X)
+        N_all = X.shape[1]
+        idx_all, X = self.reject_nans(X)
 
         # Unpack input data
         lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
@@ -46,9 +49,9 @@ class fastMP:
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
 
         # Remove the most obvious field stars to speed up the process
-        msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
+        idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
             self.first_filter(
-                msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx,
+                idx_all, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx,
                 e_pmRA, e_pmDE, e_plx)
 
         # Prepare Ripley's K data
@@ -90,7 +93,7 @@ class fastMP:
                 N_runs += 1
 
         # Assign final probabilities
-        probs_final = self.assign_probs(msk_accpt, idx_selected, N_runs)
+        probs_final = self.assign_probs(N_all, idx_all, idx_selected, N_runs)
 
         return probs_final, N_survived
 
@@ -156,7 +159,10 @@ class fastMP:
         # Combine into a single mask
         msk_accpt = np.logical_and.reduce(msk_all)
 
-        return msk_accpt, data.T[msk_accpt].T
+        # Indexes that survived
+        idx_all = np.arange(data.shape[1])[msk_accpt]
+
+        return idx_all, data.T[msk_accpt].T
 
     def get_5D_center(self, lon, lat, pmRA, pmDE, plx, N_cent=500):
         """
@@ -335,7 +341,7 @@ class fastMP:
         return x_c, y_c, pmra_c, pmde_c, plx_c
 
     def first_filter(
-        self, msk_accpt, vpd_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
+        self, idx_all, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
         e_pmDE, e_plx, v_kms_max=5, pm_max=3
     ):
         """
@@ -345,21 +351,35 @@ class fastMP:
         pm_rad = spatial.distance.cdist(pms, np.array([vpd_c])).T[0]
         msk1 = (plx > 0.5) & (pm_rad / (abs(plx) + 0.0001) < v_kms_max)
         msk2 = (plx <= 0.5) & (pm_rad < pm_max)
+        # Stars to keep
         msk = msk1 | msk2
 
         # Update arrays
-        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk], pmDE[msk],\
-            plx[msk]
+        lon, lat, pmRA, pmDE, plx = lon[msk], lat[msk], pmRA[msk],\
+            pmDE[msk], plx[msk]
         e_pmRA, e_pmDE, e_plx = e_pmRA[msk], e_pmDE[msk], e_plx[msk]
+        # Update indexes of surviving elements
+        idx_all = idx_all[msk]
 
-        # Update mask of accepted elements
-        N_accpt = len(msk_accpt)
-        # Indexes accepted by both masks
-        idxs = np.arange(0, N_accpt)[msk_accpt][msk]
-        msk_accpt = np.full(N_accpt, False)
-        msk_accpt[idxs] = True
+        if msk.sum() < self.N_clust_max:
+            return idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
 
-        return msk_accpt, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
+        # Sorted indexes of distances to pms+plx center
+        cents_3d = np.array([list(vpd_c) + [plx_c]])
+        data_3d = np.array([pmRA, pmDE, plx]).T
+        d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
+        # Indexes of stars to keep and reject based on their distance
+        idx_acpt = d_pm_plx_idxs[:self.N_clust_max]
+
+        # Update arrays
+        lon, lat, pmRA, pmDE, plx = lon[idx_acpt], lat[idx_acpt],\
+            pmRA[idx_acpt], pmDE[idx_acpt], plx[idx_acpt]
+        e_pmRA, e_pmDE, e_plx = e_pmRA[idx_acpt], e_pmDE[idx_acpt],\
+            e_plx[idx_acpt]
+        # Update indexes of surviving elements
+        idx_all = idx_all[idx_acpt]
+
+        return idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
 
     def init_ripley(self, lon, lat):
         """
@@ -389,7 +409,7 @@ class fastMP:
 
     def estimate_nmembs(
         self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-        N_clust_min=10, N_clust_max=5000, prob_cut=.5
+        N_clust_min=10, prob_cut=.5
     ):
         """
         Estimate the number of cluster members
@@ -400,12 +420,6 @@ class fastMP:
 
         idx_survived = self.ripley_survive(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust_min)
-
-        if len(idx_survived) > N_clust_max:
-            warnings.warn(
-                f"The estimated number of cluster members is >{N_clust_max}",
-                UserWarning)
-            return N_clust_max, None
 
         if len(idx_survived) < N_clust_min:
             warnings.warn(
@@ -663,14 +677,15 @@ class fastMP:
             return idx_survived
         return idx_survived[msk_d]
 
-    def assign_probs(self, msk_accpt, idx_selected, N_runs):
+    def assign_probs(self, N_all, idx_all, idx_selected, N_runs):
         """
+        Assign final probabilities for all stars
         """
         # Initial -1 probabilities for *all* stars
-        probs_final = np.zeros(len(msk_accpt)) - 1
+        probs_final = np.zeros(N_all) - 1
 
         # Number of processed stars (ie: not rejected as nans)
-        N_stars = msk_accpt.sum()
+        N_stars = len(idx_all)
         # Initial zero probabilities for the processed stars
         probs_all = np.zeros(N_stars)
 
@@ -682,6 +697,6 @@ class fastMP:
             probs_all[values] = probs
 
         # Assign the estimated probabilities to the processed stars
-        probs_final[msk_accpt] = probs_all
+        probs_final[idx_all] = probs_all
 
         return probs_final
