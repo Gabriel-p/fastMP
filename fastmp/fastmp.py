@@ -433,12 +433,8 @@ class fastMP:
             lon[msk], lat[msk], pmRA[msk], pmDE[msk], plx[msk], xy_c, vpd_c,
             plx_c, msk)
 
-        # IDs of stars that survived Ripley's filter but belong to extra
-        # clusters in the frame
-        ex_cls_ids = np.array(list(
-            set(msk).symmetric_difference(set(idx_survived))))
         # Filter by KDE
-        kde_probs = self.kde_probs(lon, lat, idx_survived, ex_cls_ids)
+        kde_probs = self.kde_probs(lon, lat, idx_survived, msk)
         N_survived = len(idx_survived)
         if kde_probs is not None:
             msk = kde_probs > prob_cut
@@ -543,7 +539,7 @@ class fastMP:
         return C_s
 
     def kde_probs(
-        self, lon, lat, idx_survived, ex_cls_ids, N_min=25, Nst_max=5000
+        self, lon, lat, idx_survived, RK_msk, N_min=25, Nst_max=5000
     ):
         """
         Assign probabilities to all stars after generating the KDEs for field
@@ -554,15 +550,22 @@ class fastMP:
             return None
 
         all_idxs = set(np.arange(len(lon)))
+        # Indexes of stars not in idx_survived
         field_idxs = np.array(list(
             all_idxs.symmetric_difference(idx_survived)))
+
+        # IDs of stars that survived Ripley's filter but belong to extra
+        # clusters in the frame
+        ex_cls_ids = np.array(list(
+            set(RK_msk).symmetric_difference(set(idx_survived))))
+
+        # Remove stars that belong to other clusters from the field set
         if len(ex_cls_ids) > 0:
             field_idxs = np.array(list(
                 set(field_idxs).symmetric_difference(ex_cls_ids)))
 
         # Combine coordinates with the rest of the features.
         all_data = np.array([lon, lat]).T
-
         # Split into the two populations.
         field_stars = all_data[field_idxs]
         membs_stars = all_data[idx_survived]
