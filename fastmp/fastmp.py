@@ -17,8 +17,8 @@ class fastMP:
                  fix_N_clust=False,
                  fixed_centers=False,
                  centers_ex=None,
-                 N_resample=100,
-                 N_clust_max=25000):
+                 N_resample=200,
+                 N_clust_max=5000):
         self.xy_c = xy_c
         self.vpd_c = vpd_c
         self.plx_c = plx_c
@@ -342,7 +342,7 @@ class fastMP:
 
     def first_filter(
         self, idx_all, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
-        e_pmDE, e_plx, v_kms_max=5, pm_max=3
+        e_pmDE, e_plx, v_kms_max=5, pm_max=3, N_clmax=5,
     ):
         """
         """
@@ -361,7 +361,7 @@ class fastMP:
         # Update indexes of surviving elements
         idx_all = idx_all[msk]
 
-        if msk.sum() < self.N_clust_max:
+        if msk.sum() < self.N_clust_max * N_clmax:
             return idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
 
         # Sorted indexes of distances to pms+plx center
@@ -369,7 +369,7 @@ class fastMP:
         data_3d = np.array([pmRA, pmDE, plx]).T
         d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
         # Indexes of stars to keep and reject based on their distance
-        idx_acpt = d_pm_plx_idxs[:self.N_clust_max]
+        idx_acpt = d_pm_plx_idxs[:int(self.N_clust_max * N_clmax)]
 
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[idx_acpt], lat[idx_acpt],\
@@ -446,6 +446,20 @@ class fastMP:
                 f"The estimated number of cluster members is <{N_clust_min}",
                 UserWarning)
             return N_clust_min, None
+
+        if N_survived > self.N_clust_max:
+            warnings.warn(
+                "The estimated number of cluster members is "
+                + f">{self.N_clust_max}", UserWarning)
+            # Select the maximum number of stars from those closest to the
+            # center
+            cents = np.array([list(xy_c) + list(vpd_c) + [plx_c]])
+            data = np.array([
+                lon[idx_survived], lat[idx_survived], pmRA[idx_survived],
+                pmDE[idx_survived], plx[idx_survived]]).T
+            d_idxs = self.get_Nd_dists(cents, data)
+            idx_survived = idx_survived[d_idxs][:self.N_clust_max]
+            return self.N_clust_max, None
 
         return N_survived, idx_survived
 
