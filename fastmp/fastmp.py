@@ -646,7 +646,7 @@ class fastMP:
 
     def get_Nd_dists(self, cents, data, dists_flag=False):
         """
-        Obtain indexes and distances of stars to the PMs+Plx center
+        Obtain indexes and distances of stars to the given center
         """
         # Distances to center
         dist_Nd = spatial.distance.cdist(data, cents).T[0]
