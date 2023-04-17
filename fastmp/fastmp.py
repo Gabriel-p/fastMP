@@ -704,9 +704,6 @@ class fastMP:
         if self.extra_cls_dict['run_flag'] is False:
             return idx_survived
 
-        # data = np.array([lon, lat, pmRA, pmDE, plx])
-        # cents = np.array([xy_c + vpd_c + [plx_c]])
-
         # Data normalization
         msk = np.full(len(lon), True)
         data, cents = self.get_dims_norm(
