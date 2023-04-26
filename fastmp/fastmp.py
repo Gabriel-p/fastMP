@@ -34,6 +34,7 @@ class fastMP:
         # HARDCODED <-- TODO
         N_min_st_cent = 5
         N_min_resample = 10
+        warnings.formatwarning = self.warning_on_one_line
 
         if self.N_resample < N_min_resample:
             raise ValueError("A minimum of 10 resample runs is required")
@@ -722,8 +723,15 @@ class fastMP:
             probs = counts / N_runs
             # Store probabilities for processed stars
             probs_all[values] = probs
+        else:
+            warnings.warn("No stars were identified as possible members")
 
         # Assign the estimated probabilities to the processed stars
         probs_final[idx_clean] = probs_all
 
         return probs_final
+
+    def warning_on_one_line(
+        self, message, category, filename, lineno, file=None, line=None
+    ):
+        return "{}: {}\n".format(category.__name__, message)
