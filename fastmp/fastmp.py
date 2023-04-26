@@ -68,7 +68,7 @@ class fastMP:
             N_survived, st_idx = self.estimate_nmembs(
                 lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        N_runs, idx_selected = 0, []
+        N_runs, idx_selected, N_05_old, prob_old, break_check = 0, [], 0, 1, 0
         for _ in range(self.N_resample + 1):
 
             # Sample data
@@ -98,6 +98,24 @@ class fastMP:
 
                 idx_selected += list(st_idx)
                 N_runs += 1
+
+            # Convergence check
+            if idx_selected:
+                counts = np.unique(idx_selected, return_counts=True)[1]
+                probs = counts/N_runs
+                msk = probs > 0.5
+                prob_mean = np.mean(probs[msk])
+                delta_probs = abs(prob_mean - prob_old)
+                N_05 = msk.sum()
+                if N_05 == N_05_old or delta_probs < .001:  # HARDCODED
+                    break_check += 1
+                else:
+                    # Reset
+                    break_check = 0
+                prob_old, N_05_old = prob_mean, N_05
+                if break_check > break_count:
+                    print(f"Convergence reached at {N_runs} runs. Breaking")
+                    break
 
         # Assign final probabilities
         probs_final = self.assign_probs(N_all, idx_clean, idx_selected, N_runs)
