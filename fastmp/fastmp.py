@@ -309,8 +309,7 @@ class fastMP:
                 cx, cy = cxm, cym
             else:
                 cx, cy = vpd_mc
-                warnings.warn("Could not estimate a better PMs center value",
-                              UserWarning)
+                warnings.warn("Could not estimate a better PMs center value")
         else:
             if cx is None:
                 cx, cy = vpd_mc
@@ -470,7 +469,7 @@ class fastMP:
         if N_survived > self.N_clust_max:
             warnings.warn(
                 "The estimated number of cluster members is "
-                + f">{self.N_clust_max}", UserWarning)
+                + f">{self.N_clust_max}")
             # Select the maximum number of stars from those closest to the
             # center
             cents = np.array([list(xy_c) + list(vpd_c) + [plx_c]])
