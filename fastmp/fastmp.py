@@ -114,7 +114,7 @@ class fastMP:
 
         centers_ex = [
             {'xy': [105.39, 0.9], 'pms': [3.5, -0.7]},
-            {'plx': [0.82], 'pms': [3.5, -0.7]}
+            {'xy': [0.82, -4.5], 'pms': [3.5, -0.7], 'plx': [3.5]}
         ]
         """
         extra_cls_dict = {'run_flag': False}
