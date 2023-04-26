@@ -656,12 +656,12 @@ class fastMP:
             return data_5d, cents_5d
 
         data_mvd = data_5d - cents_5d
-        dims_norm = 2 * np.median(abs(data_mvd[msk]), 0)
+        dims_norm = 2 * np.nanmedian(abs(data_mvd[msk]), 0)
         data_norm = data_mvd / dims_norm
 
-        cents_5d = np.array([[0., 0., 0., 0., 0.]])
+        cents_norm = np.array([[0., 0., 0., 0., 0.]])
 
-        return data_norm, cents_5d
+        return data_norm, cents_norm
 
     def get_Nd_dists(self, cents, data, dists_flag=False):
         """
@@ -679,7 +679,6 @@ class fastMP:
 
     def filter_cls_in_frame(
         self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived
-        Nmin=10,
     ):
         """
         Filter extra clusters in frame (if any)
