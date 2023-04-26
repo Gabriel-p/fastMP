@@ -418,41 +418,6 @@ class fastMP:
         """
         Estimate the number of cluster members
         """
-        # cents = np.array([list(vpd_c) + [plx_c]])
-        # lon_r, lat_r, pmRA_r, pmDE_r, plx_r = np.array(lon),\
-        #     np.array(lat), np.array(pmRA), np.array(pmDE), np.array(plx)
-        # iters = 0
-        # import matplotlib.pyplot as plt
-        # while True:
-
-        #     idx_survived = self.ripley_survive(
-        #         lon_r, lat_r, pmRA_r, pmDE_r, plx_r, vpd_c, plx_c, N_clust_min)
-
-        #     print(len(lon_r), len(idx_survived))
-        #     plt.subplot(121)
-        #     plt.scatter(lon_r, lat_r, alpha=.5)
-        #     plt.scatter(*xy_c, s=100, c='r')
-        #     plt.subplot(122)
-        #     plt.scatter(pmRA_r, pmDE_r, alpha=.5)
-        #     plt.scatter(*vpd_c, s=100, c='r')
-        #     plt.show()
-
-        #     if iters > 50:
-        #         print("iters > 50")
-        #         break
-        #     iters += 1
-        #     if len(idx_survived) < N_clust_min:
-        #         N_tot = len(lon_r)
-        #         data = np.array([pmRA_r, pmDE_r, plx_r]).T
-        #         d_idxs = self.get_Nd_dists(cents, data)
-        #         idx_survived = d_idxs[:int(.75 * N_tot)]
-        #         lon_r, lat_r, pmRA_r, pmDE_r, plx_r = lon_r[idx_survived],\
-        #             lat_r[idx_survived], pmRA_r[idx_survived],\
-        #             pmDE_r[idx_survived], plx_r[idx_survived]
-        #     else:
-        #         print("len(idx_survived) > N_clust_min")
-        #         break
-        # breakpoint()
 
         idx_survived = self.ripley_survive(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
