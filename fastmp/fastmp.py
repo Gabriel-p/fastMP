@@ -733,9 +733,10 @@ class fastMP:
             # the distance to this extra cluster's center, keep the star
             msk_d = msk_d & (dists[dims_ex] <= dists_ex)
 
-        # Never return less than Nmin stars
-        if msk_d.sum() < Nmin:
+        # Never return less than N_clust_min stars
+        if msk_d.sum() < self.N_clust_min:
             return idx_survived
+
         return idx_survived[msk_d]
 
     def assign_probs(self, N_all, idx_clean, idx_selected, N_runs):
