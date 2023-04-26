@@ -602,14 +602,16 @@ class fastMP:
         field_stars = all_data[field_idxs]
         membs_stars = all_data[idx_survived]
 
-        # To improve the performance, cap the number of stars using a random
-        # selection of 'Nf_max' elements.
-        if field_stars.shape[0] > Nst_max:
-            idxs = np.arange(field_stars.shape[0])
-            np.random.shuffle(idxs)
-            field_stars = field_stars[idxs[:Nst_max]]
+        # To improve the performance, cap the number of stars using a
+        # selection of 'N_clust_max' elements.
+        N_field = field_stars.shape[0]
+        if N_field > self.N_clust_max:
+            idxs = np.arange(N_field)
+            # USe step to avoid randomness here
+            step = max(1, int(round(N_field/self.N_clust_max)))
+            idxs = idxs[::step]
+            field_stars = field_stars[idxs[:self.N_clust_max]]
 
-        if len(field_stars) < N_min:
         if len(field_stars) < self.N_clust_min:
             return None
 
