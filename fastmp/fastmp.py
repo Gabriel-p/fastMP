@@ -17,7 +17,8 @@ class fastMP:
                  fix_N_clust=False,
                  fixed_centers=False,
                  centers_ex=None,
-                 N_resample=200,
+                 N_resample=500,
+                 N_clust_min=25,
                  N_clust_max=5000):
         self.xy_c = xy_c
         self.vpd_c = vpd_c
@@ -26,18 +27,20 @@ class fastMP:
         self.fixed_centers = fixed_centers
         self.centers_ex = centers_ex
         self.N_resample = int(N_resample)
+        self.N_clust_min = int(N_clust_min)
         self.N_clust_max = int(N_clust_max)
 
     def fit(self, X):
         """
         """
         # HARDCODED <-- TODO
-        N_min_st_cent = 5
-        N_min_resample = 10
+        N_min_resample = 25
+        break_count = max(N_min_resample, int(self.N_resample * .05))
+
         warnings.formatwarning = self.warning_on_one_line
 
-        if self.N_resample < N_min_resample:
-            raise ValueError("A minimum of 10 resample runs is required")
+        if self.N_resample <= 2 * N_min_resample:
+            warnings.warn("The number of resamples should be larger")
 
         # Prepare dictionary of parameters for extra clusters in frame (if any)
         self.prep_extra_cl_dict()
@@ -91,7 +94,7 @@ class fastMP:
                 plx[st_idx], xy_c, vpd_c, plx_c, st_idx)
 
             # Re-estimate centers using the selected stars
-            if len(st_idx) > N_min_st_cent:
+            if len(st_idx) > self.N_clust_min:
                 xy_c, vpd_c, plx_c = self.get_5D_center(
                     lon[st_idx], lat[st_idx], pmRA[st_idx], pmDE[st_idx],
                     plx[st_idx])
@@ -263,9 +266,7 @@ class fastMP:
 
         return pmRA_i, pmDE_i
 
-    def get_pms_center(
-        self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10, N_min_st=5
-    ):
+    def get_pms_center(self, pmRA, pmDE, N_bins=50, zoom_f=4, N_zoom=10):
         """
         """
         vpd_mc = self.vpd_c
@@ -276,7 +277,7 @@ class fastMP:
         cx, cxm = None, None
         for _ in range(N_zoom):
             N_stars = vpd.shape[0]
-            if N_stars < N_min_st:
+            if N_stars < self.N_clust_min:
                 break
 
             # Find center coordinates as max density
@@ -339,7 +340,7 @@ class fastMP:
 
         return lon[idx], lat[idx], pmRA[idx], pmDE[idx], plx[idx]
 
-    def get_kNN_center(self, data, Ndens=25, Nstars=10):
+    def get_kNN_center(self, data):
         """
         Estimate 5D center with kNN. Better results are obtained not using
         the parallax data
@@ -347,7 +348,7 @@ class fastMP:
         data_noplx = data[:, :4]
 
         tree = spatial.cKDTree(data_noplx)
-        inx = tree.query(data_noplx, k=Ndens + 1)
+        inx = tree.query(data_noplx, k=self.N_clust_min + 1)
         NN_dist = inx[0].max(1)
         # Convert to densities
         dens = 1. / NN_dist
@@ -357,7 +358,7 @@ class fastMP:
         # Use the star with the largest density
         # cent = np.array([data[idxs[0]]])[0]
         # # Use median of stars with largest densities
-        cent = np.median(data[idxs[:Nstars]], 0)
+        cent = np.median(data[idxs[:self.N_clust_min]], 0)
 
         x_c, y_c, pmra_c, pmde_c, plx_c = cent
         return x_c, y_c, pmra_c, pmde_c, plx_c
@@ -431,20 +432,20 @@ class fastMP:
 
     def estimate_nmembs(
         self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c,
-        N_clust_min=25, prob_cut=.5
+        prob_cut=.5, N_clust=50, N_extra=5, N_step=10, N_break=5
     ):
         """
         Estimate the number of cluster members
         """
-
         idx_survived = self.ripley_survive(
-            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c)
+            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
+            N_step, N_break)
 
-        if len(idx_survived) < N_clust_min:
+        if len(idx_survived) < self.N_clust_min:
             warnings.warn(
-                f"The estimated number of cluster members is <{N_clust_min}",
-                UserWarning)
-            return N_clust_min, None
+                "The estimated number of cluster members is "
+                + f"<{self.N_clust_min}")
+            return self.N_clust_min, None
 
         # Filter extra clusters in frame (if any)
         msk = np.array(idx_survived)
@@ -460,11 +461,11 @@ class fastMP:
             N_survived = min(N_survived, msk.sum())
             idx_survived = idx_survived[msk]
 
-        if N_survived < N_clust_min:
+        if N_survived < self.N_clust_min:
             warnings.warn(
-                f"The estimated number of cluster members is <{N_clust_min}",
-                UserWarning)
-            return N_clust_min, None
+                "The estimated number of cluster members is "
+                + f"<{self.N_clust_min}")
+            return self.N_clust_min, None
 
         if N_survived > self.N_clust_max:
             warnings.warn(
@@ -483,8 +484,8 @@ class fastMP:
         return N_survived, idx_survived
 
     def ripley_survive(
-        self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust=50, N_extra=5,
-        N_step=10, N_break=5
+        self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
+        N_step, N_break
     ):
         """
         Process data to identify the indexes of stars that survive the
@@ -571,15 +572,13 @@ class fastMP:
 
         return C_s
 
-    def kde_probs(
-        self, lon, lat, idx_survived, RK_msk, N_min=25, Nst_max=5000
-    ):
+    def kde_probs(self, lon, lat, idx_survived, RK_msk):
         """
         Assign probabilities to all stars after generating the KDEs for field
         and member stars. The cluster member probability is obtained applying
         the formula for two mutually exclusive and exhaustive hypotheses.
         """
-        if len(idx_survived) < N_min:
+        if len(idx_survived) < self.N_clust_min:
             return None
 
         all_idxs = set(np.arange(len(lon)))
@@ -643,7 +642,7 @@ class fastMP:
         return data_3 + grs * data_err
 
     def get_dims_norm(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk, Nmin=10,
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk
     ):
         """
         Normalize dimensions using twice the median of the selected probable
@@ -652,7 +651,7 @@ class fastMP:
         data_5d = np.array([lon, lat, pmRA, pmDE, plx]).T
         cents_5d = np.array([xy_c + vpd_c + [plx_c]])
 
-        if msk is None or len(msk) < Nmin:
+        if msk is None or len(msk) < self.N_clust_min:
             return data_5d, cents_5d
 
         data_mvd = data_5d - cents_5d
@@ -678,7 +677,7 @@ class fastMP:
         return d_idxs
 
     def filter_cls_in_frame(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived,
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived
         Nmin=10,
     ):
         """
