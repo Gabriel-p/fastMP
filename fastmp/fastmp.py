@@ -43,7 +43,7 @@ class fastMP:
 
         # Remove nans
         N_all = X.shape[1]
-        idx_all, X = self.reject_nans(X)
+        idx_clean, X = self.reject_nans(X)
 
         # Unpack input data
         lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
@@ -52,9 +52,9 @@ class fastMP:
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
 
         # Remove the most obvious field stars to speed up the process
-        idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
+        idx_clean, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
             self.first_filter(
-                idx_all, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx,
+                idx_clean, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx,
                 e_pmRA, e_pmDE, e_plx)
 
         # Prepare Ripley's K data
@@ -99,7 +99,7 @@ class fastMP:
                 N_runs += 1
 
         # Assign final probabilities
-        probs_final = self.assign_probs(N_all, idx_all, idx_selected, N_runs)
+        probs_final = self.assign_probs(N_all, idx_clean, idx_selected, N_runs)
 
         return probs_final, N_survived
 
@@ -166,9 +166,9 @@ class fastMP:
         msk_accpt = np.logical_and.reduce(msk_all)
 
         # Indexes that survived
-        idx_all = np.arange(data.shape[1])[msk_accpt]
+        idx_clean = np.arange(data.shape[1])[msk_accpt]
 
-        return idx_all, data.T[msk_accpt].T
+        return idx_clean, data.T[msk_accpt].T
 
     def get_5D_center(self, lon, lat, pmRA, pmDE, plx, N_cent=500):
         """
@@ -735,15 +735,19 @@ class fastMP:
             return idx_survived
         return idx_survived[msk_d]
 
-    def assign_probs(self, N_all, idx_all, idx_selected, N_runs):
+    def assign_probs(self, N_all, idx_clean, idx_selected, N_runs):
         """
         Assign final probabilities for all stars
+
+        N_all: all stars in input frame
+        idx_clean: indexes of stars that survived the removal of 'nans' and
+        of stars that are clear field stars
         """
         # Initial -1 probabilities for *all* stars
         probs_final = np.zeros(N_all) - 1
 
         # Number of processed stars (ie: not rejected as nans)
-        N_stars = len(idx_all)
+        N_stars = len(idx_clean)
         # Initial zero probabilities for the processed stars
         probs_all = np.zeros(N_stars)
 
@@ -755,6 +759,6 @@ class fastMP:
             probs_all[values] = probs
 
         # Assign the estimated probabilities to the processed stars
-        probs_final[idx_all] = probs_all
+        probs_final[idx_clean] = probs_all
 
         return probs_final
