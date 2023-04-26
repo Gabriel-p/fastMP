@@ -610,6 +610,7 @@ class fastMP:
             field_stars = field_stars[idxs[:Nst_max]]
 
         if len(field_stars) < N_min:
+        if len(field_stars) < self.N_clust_min:
             return None
 
         # Evaluate all stars in both KDEs
