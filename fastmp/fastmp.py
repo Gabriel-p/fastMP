@@ -688,11 +688,29 @@ class fastMP:
         if self.extra_cls_dict['run_flag'] is False:
             return idx_survived
 
+        # Add centers to the end of these lists to normalize their values too
+        dims_plus_cents = [list(_) for _ in (lon, lat, pmRA, pmDE, plx)]
+        for cent in self.extra_cls_dict['centers']:
+            # For each dimension, some won't be present
+            for i in range(5):
+                try:
+                    dims_plus_cents[i].append(cent[i])
+                except IndexError:
+                    dims_plus_cents[i].append(np.nan)
+        lon2, lat2, pmRA2, pmDE2, plx2 = dims_plus_cents
+
         # Data normalization
-        msk = np.full(len(lon), True)
+        msk = np.full(len(lon2), True)
         data, cents = self.get_dims_norm(
-            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
+            lon2, lat2, pmRA2, pmDE2, plx2, xy_c, vpd_c, plx_c, msk)
         data = data.T
+
+        # Extract normalized centers for extra clusters
+        new_cents = []
+        for i in range(len(self.extra_cls_dict['centers']), 0, -1):
+            new_cents.append([_ for _ in data[:, -i] if not np.isnan(_)])
+        # Remove center values from the 'data' array
+        data = data[:, :-len(new_cents)]
 
         # Find the distances to the center for all the combinations of data
         # dimensions in the extra clusters in frame
@@ -702,9 +720,10 @@ class fastMP:
             dists[dims] = self.get_Nd_dists(
                 cents[:, msk], data[msk, :].T, True)
 
-        #
+        # Identify stars closer to the cluster's center than the centers of
+        # extra clusters
         msk_d = np.full(len(idx_survived), True)
-        for i, cent_ex in enumerate(self.extra_cls_dict['centers']):
+        for i, cent_ex in enumerate(new_cents):
             dims_ex = self.extra_cls_dict['dim_keys'][i]
             msk = self.dims_msk[dims_ex]
             dists_ex = self.get_Nd_dists(
