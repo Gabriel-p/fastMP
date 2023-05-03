@@ -45,12 +45,12 @@ class fastMP:
         # Prepare dictionary of parameters for extra clusters in frame (if any)
         self.prep_extra_cl_dict()
 
-        # Remove nans
+        # Remove 'nan' values
         N_all = X.shape[1]
-        idx_clean, X = self.reject_nans(X)
+        idx_clean, X_no_nan = self.reject_nans(X)
 
         # Unpack input data
-        lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X
+        lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx = X_no_nan
 
         # Estimate initial center
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
@@ -82,7 +82,7 @@ class fastMP:
             data_5d, cents_5d = self.get_dims_norm(
                 lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c, st_idx)
 
-            # Indexes of the sorted 5D distances 5D to the estimated center
+            # Indexes of the sorted 5D distances to the estimated center
             d_idxs = self.get_Nd_dists(cents_5d, data_5d)
 
             # Star selection
@@ -122,8 +122,10 @@ class fastMP:
 
         # Assign final probabilities
         probs_final = self.assign_probs(N_all, idx_clean, idx_selected, N_runs)
+        # Change '0' probabilities using linear relation
+        probs_final = self.probs_0(X, xy_c, vpd_c, plx_c, probs_final)
 
-        return probs_final, N_survived
+        return probs_final
 
     def prep_extra_cl_dict(self):
         """
@@ -365,9 +367,15 @@ class fastMP:
 
     def first_filter(
         self, idx_all, vpd_c, plx_c, lon, lat, pmRA, pmDE, plx, e_pmRA,
-        e_pmDE, e_plx, plx_cut=0.5, v_kms_max=5, pm_max=3, N_clmax=5,
+        e_pmDE, e_plx, plx_cut=0.5, v_kms_max=5, pm_max=3, N_times=5,
     ):
         """
+        plx_cut: Parallax value that determines the cut in the filter rule
+        between the using 'v_kms_max' or 'pm_max'
+        v_kms_max:
+        pm_max:
+        N_times: number of times used to multiply 'N_clust_max' to determine
+        how many stars to keep
         """
         # Remove obvious field stars
         pms = np.array([pmRA, pmDE]).T
@@ -384,7 +392,7 @@ class fastMP:
         # Update indexes of surviving elements
         idx_all = idx_all[msk]
 
-        if msk.sum() < self.N_clust_max * N_clmax:
+        if msk.sum() < self.N_clust_max * N_times:
             return idx_all, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx
 
         # Sorted indexes of distances to pms+plx center
@@ -392,7 +400,7 @@ class fastMP:
         data_3d = np.array([pmRA, pmDE, plx]).T
         d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
         # Indexes of stars to keep and reject based on their distance
-        idx_acpt = d_pm_plx_idxs[:int(self.N_clust_max * N_clmax)]
+        idx_acpt = d_pm_plx_idxs[:int(self.N_clust_max * N_times)]
 
         # Update arrays
         lon, lat, pmRA, pmDE, plx = lon[idx_acpt], lat[idx_acpt],\
@@ -766,6 +774,36 @@ class fastMP:
 
         # Assign the estimated probabilities to the processed stars
         probs_final[idx_clean] = probs_all
+
+        return probs_final
+
+    def probs_0(self, X, xy_c, vpd_c, plx_c, probs_final, prob_cut=0.5):
+        """
+        """
+        lon, lat, pmRA, pmDE, plx = X[:5]
+        msk = probs_final > prob_cut
+
+        if msk.sum() < self.N_clust_min:
+            return probs_final
+
+        # Data normalization
+        data_5d, cents_5d = self.get_dims_norm(
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
+
+        # 5D distances to the estimated center
+        dists = self.get_Nd_dists(cents_5d, data_5d, True)
+
+        # Stars with '0' probabilities
+        msk_0 = probs_final == 0.
+
+        # Linear relation for: (0, d_max), (p_min, d_min)
+        d_min, d_max = dists[msk_0].min(), dists[msk_0].max()
+        p_min = probs_final[probs_final > 0.].min()
+        m, h = (d_min - d_max)/p_min, d_max
+        probs_0 = (dists[msk_0] - h) / m
+
+        # Assign new probabilities to 'msk_0' stars
+        probs_final[msk_0] = probs_0
 
         return probs_final
 
