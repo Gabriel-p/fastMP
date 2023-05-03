@@ -54,6 +54,7 @@ class fastMP:
 
         # Estimate initial center
         xy_c, vpd_c, plx_c = self.get_5D_center(lon, lat, pmRA, pmDE, plx)
+        cents_init = [xy_c, vpd_c, plx_c]
 
         # Remove the most obvious field stars to speed up the process
         idx_clean, lon, lat, pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx =\
@@ -123,7 +124,7 @@ class fastMP:
         # Assign final probabilities
         probs_final = self.assign_probs(N_all, idx_clean, idx_selected, N_runs)
         # Change '0' probabilities using linear relation
-        probs_final = self.probs_0(X, xy_c, vpd_c, plx_c, probs_final)
+        probs_final = self.probs_0(X, cents_init, probs_final)
 
         return probs_final
 
@@ -777,28 +778,33 @@ class fastMP:
 
         return probs_final
 
-    def probs_0(self, X, xy_c, vpd_c, plx_c, probs_final, prob_cut=0.5):
+    def probs_0(self, X, cents_init, probs_final, p_min=0.01):
         """
         """
-        lon, lat, pmRA, pmDE, plx = X[:5]
-        msk = probs_final > prob_cut
-
-        if msk.sum() < self.N_clust_min:
+        # Stars with '0' probabilities
+        msk_0 = probs_final == 0.
+        if msk_0.sum() == 0:
             return probs_final
 
-        # Data normalization
+        # Original full data
+        lon, lat, pmRA, pmDE, plx = X[:5]
+        xy_c, vpd_c, plx_c = cents_init
+
+        # Data normalization for all the stars
+        msk = np.full((len(lon)), True)
         data_5d, cents_5d = self.get_dims_norm(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
 
         # 5D distances to the estimated center
         dists = self.get_Nd_dists(cents_5d, data_5d, True)
 
-        # Stars with '0' probabilities
-        msk_0 = probs_final == 0.
+        # Select 'p_min' as the smallest between (0, 0.5)
+        msk_0_5 = (probs_final > 0) & (probs_final < .5)
+        if msk_0_5.sum() > 1:
+            p_min = probs_final[msk_0_5].min()
 
         # Linear relation for: (0, d_max), (p_min, d_min)
         d_min, d_max = dists[msk_0].min(), dists[msk_0].max()
-        p_min = probs_final[probs_final > 0.].min()
         m, h = (d_min - d_max)/p_min, d_max
         probs_0 = (dists[msk_0] - h) / m
 
