@@ -18,6 +18,7 @@ class fastMP:
                  fixed_centers=False,
                  centers_ex=None,
                  N_resample=500,
+                 N_min_resample=25,
                  N_clust_min=25,
                  N_clust_max=5000):
         self.xy_c = xy_c
@@ -27,20 +28,21 @@ class fastMP:
         self.fixed_centers = fixed_centers
         self.centers_ex = centers_ex
         self.N_resample = int(N_resample)
+        self.N_min_resample = int(N_min_resample)
         self.N_clust_min = int(N_clust_min)
         self.N_clust_max = int(N_clust_max)
 
     def fit(self, X):
         """
         """
-        # HARDCODED <-- TODO
-        N_min_resample = 25
-        break_count = max(N_min_resample, int(self.N_resample * .05))
-
         warnings.formatwarning = self.warning_on_one_line
 
-        if self.N_resample <= 2 * N_min_resample:
-            warnings.warn("The number of resamples should be larger")
+        if self.N_resample <= 2 * self.N_min_resample:  # HARDCODED
+            warnings.warn(
+                f"The number of resamples ({self.N_resample}) is small")
+
+        # HARDCODED
+        break_count = max(self.N_min_resample, int(self.N_resample * .05))
 
         # Prepare dictionary of parameters for extra clusters in frame (if any)
         self.prep_extra_cl_dict()
