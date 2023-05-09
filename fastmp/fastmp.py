@@ -780,11 +780,12 @@ class fastMP:
 
         return probs_final
 
-    def probs_0(self, X, cents_init, probs_final, p_min=0.01):
+    def probs_0(self, X, cents_init, probs_final, p_min=0.5):
         """
         """
         # Stars with '0' probabilities
         msk_0 = probs_final == 0.
+        # If no stars with prob=0, nothing to do
         if msk_0.sum() == 0:
             return probs_final
 
@@ -796,11 +797,10 @@ class fastMP:
         msk = np.full((len(lon)), True)
         data_5d, cents_5d = self.get_dims_norm(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
-
         # 5D distances to the estimated center
         dists = self.get_Nd_dists(cents_5d, data_5d, True)
 
-        # Select 'p_min' as the smallest between (0, 0.5)
+        # Select 'p_min' as the smallest value between (0, 0.5)
         msk_0_5 = (probs_final > 0) & (probs_final < .5)
         if msk_0_5.sum() > 1:
             p_min = probs_final[msk_0_5].min()
