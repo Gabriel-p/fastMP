@@ -128,7 +128,7 @@ class fastMP:
         # Change '0' probabilities using linear relation
         probs_final = self.probs_0(X, cents_init, probs_final)
 
-        return probs_final
+        return probs_final, N_survived
 
     def prep_extra_cl_dict(self):
         """
@@ -780,8 +780,11 @@ class fastMP:
 
         return probs_final
 
-    def probs_0(self, X, cents_init, probs_final, p_min=0.5):
+    def probs_0(self, X, cents_init, probs_final, p_min=0.1):
         """
+        To all stars with prob=0 assign a probability from 0 to p_min
+        that follows a linear relation associated to their 5D distance to the
+        initial defined center
         """
         # Stars with '0' probabilities
         msk_0 = probs_final == 0.
@@ -800,8 +803,8 @@ class fastMP:
         # 5D distances to the estimated center
         dists = self.get_Nd_dists(cents_5d, data_5d, True)
 
-        # Select 'p_min' as the smallest value between (0, 0.5)
-        msk_0_5 = (probs_final > 0) & (probs_final < .5)
+        # Select 'p_min' as the minimum probability between (0., 0.5)
+        msk_0_5 = (probs_final > 0.) & (probs_final < .5)
         if msk_0_5.sum() > 1:
             p_min = probs_final[msk_0_5].min()
 
