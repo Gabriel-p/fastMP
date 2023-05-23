@@ -74,7 +74,8 @@ class fastMP:
             N_survived, st_idx = self.estimate_nmembs(
                 lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c)
 
-        N_runs, idx_selected, N_05_old, prob_old, break_check = 0, [], 0, 1, 0
+        idx_selected, dims_norm_all = [], None
+        N_runs, N_05_old, prob_old, break_check = 0, 0, 1, 0
         for _ in range(self.N_resample + 1):
 
             # Sample data
@@ -82,8 +83,9 @@ class fastMP:
                 pmRA, pmDE, plx, e_pmRA, e_pmDE, e_plx)
 
             # Data normalization
-            data_5d, cents_5d = self.get_dims_norm(
-                lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c, st_idx)
+            data_5d, cents_5d, dims_norm_all = self.get_dims_norm(
+                lon, lat, s_pmRA, s_pmDE, s_plx, xy_c, vpd_c, plx_c, st_idx,
+                dims_norm_all)
 
             # Indexes of the sorted 5D distances to the estimated center
             d_idxs = self.get_Nd_dists(cents_5d, data_5d)
@@ -374,7 +376,7 @@ class fastMP:
     ):
         """
         plx_cut: Parallax value that determines the cut in the filter rule
-        between the using 'v_kms_max' or 'pm_max'
+        between using 'v_kms_max' or 'pm_max'
         v_kms_max:
         pm_max:
         N_times: number of times used to multiply 'N_clust_max' to determine
@@ -656,7 +658,8 @@ class fastMP:
         return data_3 + grs * data_err
 
     def get_dims_norm(
-        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk,
+        dims_norm_all=None
     ):
         """
         Normalize dimensions using twice the median of the selected probable
@@ -669,12 +672,17 @@ class fastMP:
             return data_5d, cents_5d
 
         data_mvd = data_5d - cents_5d
+
         dims_norm = 2 * np.nanmedian(abs(data_mvd[msk]), 0)
+        if dims_norm_all is not None:
+            dims_norm_all.append(dims_norm)
+            dims_norm = np.median(dims_norm_all)
+
         data_norm = data_mvd / dims_norm
 
         cents_norm = np.array([[0., 0., 0., 0., 0.]])
 
-        return data_norm, cents_norm
+        return data_norm, cents_norm, dims_norm_all
 
     def get_Nd_dists(self, cents, data, dists_flag=False):
         """
@@ -712,7 +720,7 @@ class fastMP:
 
         # Data normalization
         msk = np.full(len(lon2), True)
-        data, cents = self.get_dims_norm(
+        data, cents, _ = self.get_dims_norm(
             lon2, lat2, pmRA2, pmDE2, plx2, xy_c, vpd_c, plx_c, msk)
         data = data.T
 
@@ -798,7 +806,7 @@ class fastMP:
 
         # Data normalization for all the stars
         msk = np.full((len(lon)), True)
-        data_5d, cents_5d = self.get_dims_norm(
+        data_5d, cents_5d, _ = self.get_dims_norm(
             lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
         # 5D distances to the estimated center
         dists = self.get_Nd_dists(cents_5d, data_5d, True)
