@@ -704,6 +704,7 @@ class fastMP:
         """
         Filter extra clusters in frame (if any)
         """
+        # If there are no extra clusters to remove, skip
         if self.extra_cls_dict['run_flag'] is False:
             return idx_survived
 
@@ -745,6 +746,7 @@ class fastMP:
         for i, cent_ex in enumerate(new_cents):
             dims_ex = self.extra_cls_dict['dim_keys'][i]
             msk = self.dims_msk[dims_ex]
+            # Distance to this extra cluster's center
             dists_ex = self.get_Nd_dists(
                 np.array([cent_ex]), data[msk, :].T, True)
 
