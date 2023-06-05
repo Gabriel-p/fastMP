@@ -467,8 +467,9 @@ class fastMP:
         idx_survived = self.ripley_survive(
             lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
             N_step, N_break)
+        N_survived = len(idx_survived)
 
-        if len(idx_survived) < self.N_clust_min:
+        if N_survived < self.N_clust_min:
             warnings.warn(
                 "The estimated number of cluster members is "
                 + f"<{self.N_clust_min}")
