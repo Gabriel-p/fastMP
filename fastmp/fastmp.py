@@ -465,7 +465,7 @@ class fastMP:
         Estimate the number of cluster members
         """
         idx_survived = self.ripley_survive(
-            lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, N_clust, N_extra,
             N_step, N_break)
         N_survived = len(idx_survived)
 
@@ -542,7 +542,7 @@ class fastMP:
     #     return idx_survived_HDB
 
     def ripley_survive(
-        self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
+        self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, N_clust, N_extra,
         N_step, N_break
     ):
         """
@@ -551,25 +551,45 @@ class fastMP:
         """
         cents_3d = np.array([list(vpd_c) + [plx_c]])
         data_3d = np.array([pmRA, pmDE, plx]).T
+        # Ordered indexes according to smallest distances to 'cents_3d'
         d_pm_plx_idxs = self.get_Nd_dists(cents_3d, data_3d)
         xy = np.array([lon, lat]).T
         N_stars = xy.shape[0]
 
-        def core(N_clust_surv):
+        # Identify stars associated to extra clusters in frame (if any)
+        msk = np.arange(0, len(lon))
+        idx_survived_init = self.filter_cls_in_frame(
+            lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, msk)
+
+        def core(N_clust_surv, idx_survived_init):
             """
+            This is the core function that estimates the number of members
+            based on Ripley's K-function.
             """
+            # Define K-function threshold
             C_thresh = self.C_thresh_N / N_clust_surv
             idx_survived = []
             N_break_count, step_old = 0, 0
             for step in np.arange(N_clust_surv, N_stars, N_clust_surv):
-                msk = d_pm_plx_idxs[step_old:step]
-                C_s = self.rkfunc(xy[msk], self.rads, self.Kest)
+                # Ring of stars around the VPD+Plx centers
+                msk_ring = d_pm_plx_idxs[step_old:step]
+                # Obtain their Ripely K estimator
+                C_s = self.rkfunc(xy[msk_ring], self.rads, self.Kest)
+
+                # Remove stars associated to other clusters
+                msk_extra_cls = np.isin(msk_ring, idx_survived_init)
+                msk = msk_ring[msk_extra_cls]
+
+                # If less than half survived, discard
+                if len(msk) < int(N_clust_surv * .5):  # HARDCODED
+                    C_s = np.nan
+
                 if not np.isnan(C_s):
-                    # Cluster survived
+                    # This group of stars survived
                     if C_s >= C_thresh:
                         idx_survived += list(msk)
                     else:
-                        # Break condition
+                        # Increase break condition
                         N_break_count += 1
                 if N_break_count > N_break:
                     break
@@ -578,13 +598,13 @@ class fastMP:
 
         # Select those clusters where the stars are different enough from a
         # random distribution
-        idx_survived = core(N_clust)
+        idx_survived = core(N_clust, idx_survived_init)
         if not idx_survived:
             # If the default clustering number did not work, try a few
             # more values with an increasing number of cluster stars
             for _ in range(N_extra):
                 N_clust_surv = int(N_clust + (_ + 1) * N_step)
-                idx_survived = core(N_clust_surv)
+                idx_survived = core(N_clust_surv, idx_survived_init)
                 # Break out when (if) any value selected stars
                 if len(idx_survived) > 0:
                     break
