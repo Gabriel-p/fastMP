@@ -500,11 +500,9 @@ class fastMP:
                 + f">{self.N_clust_max}")
             # Select the maximum number of stars from those closest to the
             # center
-            cents = np.array([list(xy_c) + list(vpd_c) + [plx_c]])
-            data = np.array([
-                lon[idx_survived], lat[idx_survived], pmRA[idx_survived],
-                pmDE[idx_survived], plx[idx_survived]]).T
-            d_idxs = self.get_Nd_dists(cents, data)
+            data_norm, cents_norm = self.get_dims_norm(
+                lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c, idx_survived)
+            d_idxs = self.get_Nd_dists(cents_norm, data_norm[idx_survived])
             idx_survived = idx_survived[d_idxs][:self.N_clust_max]
             return self.N_clust_max, None
 
