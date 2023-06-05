@@ -124,18 +124,20 @@ class fastMP:
                 counts = np.unique(idx_selected, return_counts=True)[1]
                 probs = counts/N_runs
                 msk = probs > 0.5
-                prob_mean = np.mean(probs[msk])
-                delta_probs = abs(prob_mean - prob_old)
                 N_05 = msk.sum()
-                if N_05 == N_05_old or delta_probs < .001:  # HARDCODED
-                    break_check += 1
-                else:
-                    # Reset
-                    break_check = 0
-                prob_old, N_05_old = prob_mean, N_05
-                if break_check > break_count:
-                    print(f"Convergence reached at {N_runs} runs. Breaking")
-                    break
+                if N_05 > 2:
+                    prob_mean = np.mean(probs[msk])
+                    delta_probs = abs(prob_mean - prob_old)
+                    if N_05 == N_05_old or delta_probs < .001:  # HARDCODED
+                        break_check += 1
+                    else:
+                        # Reset
+                        break_check = 0
+                    prob_old, N_05_old = prob_mean, N_05
+                    if break_check > break_count:
+                        print(
+                            f"Convergence reached at {N_runs} runs. Breaking")
+                        break
 
         # Assign final probabilities
         probs_final = self.assign_probs(N_all, idx_clean, idx_selected, N_runs)
