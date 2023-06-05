@@ -508,6 +508,39 @@ class fastMP:
 
         return N_survived, idx_survived
 
+    # def HDBSCAN_survive(self, lon, lat, pmRA, pmDE, plx, xy_c, vpd_c, plx_c):
+    #     """
+    #     """
+    #     import hdbscan
+
+    #     data_5d = np.array([lon, lat, pmRA, pmDE, plx]).T
+    #     cents_5d = np.array([xy_c + vpd_c + [plx_c]])
+    #     data_mvd = data_5d - cents_5d
+    #     dims_norm = 2 * np.nanmedian(abs(data_mvd), 0)
+    #     data_norm = data_mvd / dims_norm
+
+    #     clusterer = hdbscan.HDBSCAN(min_cluster_size=50) # min_samples=10
+    #     cluster_labels = clusterer.fit_predict(data_norm)
+    #     if cluster_labels.max() == -1:
+    #         clusterer = hdbscan.HDBSCAN(min_cluster_size=25)
+    #         cluster_labels = clusterer.fit_predict(data_norm)
+
+    #     if cluster_labels.max() == -1:
+    #         idx_survived_HDB = []
+    #     else:
+    #         d_old = np.inf
+    #         for lbl in range(0, cluster_labels.max() + 1):
+    #             msk = cluster_labels == lbl
+    #             d_cl = abs(np.median(data_norm[msk]))
+
+    #             if d_cl < d_old:
+    #                 idx = lbl
+    #                 d_old = d_cl
+    #         msk = cluster_labels == idx
+    #         idx_survived_HDB = np.arange(0, len(lon))[msk]
+
+    #     return idx_survived_HDB
+
     def ripley_survive(
         self, lon, lat, pmRA, pmDE, plx, vpd_c, plx_c, N_clust, N_extra,
         N_step, N_break
