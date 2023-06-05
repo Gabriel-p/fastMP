@@ -483,11 +483,10 @@ class fastMP:
 
         # Filter by KDE
         kde_probs = self.kde_probs(lon, lat, idx_survived, msk)
-        N_survived = len(idx_survived)
         if kde_probs is not None:
             msk = kde_probs > prob_cut
-            N_survived = min(N_survived, msk.sum())
             idx_survived = idx_survived[msk]
+        N_survived = len(idx_survived)
 
         if N_survived < self.N_clust_min:
             warnings.warn(
