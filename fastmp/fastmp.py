@@ -579,10 +579,9 @@ class fastMP:
                 # Remove stars associated to other clusters
                 msk_extra_cls = np.isin(msk_ring, idx_survived_init)
                 msk = msk_ring[msk_extra_cls]
-
-                # If less than half survived, discard
-                if len(msk) < int(N_clust_surv * .5):  # HARDCODED
-                    C_s = np.nan
+                # If only a small percentage survived, discard
+                if len(msk) < int(N_clust_surv * .25):  # HARDCODED
+                    C_s = 0
 
                 if not np.isnan(C_s):
                     # This group of stars survived
